@@ -1,11 +1,10 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import type { Repo } from './github';
-import type { BuiltTown, BuildingHandle } from './town';
+import { STREET_Y, WORLD_SCALE, type BuiltTown, type BuildingHandle, type Rect } from './town';
 import { clamp } from './theme';
 
 export interface HoverInfo {
@@ -14,12 +13,43 @@ export interface HoverInfo {
   clientY: number;
 }
 
+interface Collider {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}
+
+const WALK_SPEED = 6.5;
+const RUN_SPEED = 17;
+const PLAYER_RADIUS = 0.45;
+const JUMP_SPEED = 5.4;
+const GRAVITY = 17;
+const LOOK_SENSITIVITY = 0.0021;
+const DRAG_SENSITIVITY = 0.0042;
+const PICK_DISTANCE = 320;
+const INTRO_MS = 3400;
+
+function isTyping(): boolean {
+  const active = document.activeElement;
+  return (
+    active instanceof HTMLInputElement ||
+    active instanceof HTMLTextAreaElement ||
+    active instanceof HTMLSelectElement ||
+    (active instanceof HTMLElement && active.isContentEditable)
+  );
+}
+
+/**
+ * Renders the town and lets the viewer walk through it in first person:
+ * click to capture the mouse, WASD / arrow keys to walk, Shift to run, Space
+ * to jump. On touch screens, drag to look and use the on-screen stick to walk.
+ */
 export class TownWorld {
   private readonly container: HTMLElement;
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene: THREE.Scene;
   private readonly camera: THREE.PerspectiveCamera;
-  private readonly controls: OrbitControls;
   private readonly composer: EffectComposer;
   private readonly startedAt = performance.now();
   private lastFrame = performance.now();
@@ -28,14 +58,34 @@ export class TownWorld {
   private readonly hoverRing: THREE.Mesh;
   private readonly keyLight: THREE.DirectionalLight;
   private readonly fillLight: THREE.DirectionalLight;
+  private readonly joystickEl: HTMLElement | null;
+  private readonly joystickKnob: HTMLElement | null;
 
   private town: BuiltTown | null = null;
   private hovered: BuildingHandle | null = null;
-  private intro: { from: THREE.Vector3; to: THREE.Vector3; started: number } | null = null;
-  private lastInteraction = performance.now();
-  private pointerDown: { x: number; y: number } | null = null;
+  private intro: {
+    fromPosition: THREE.Vector3;
+    toPosition: THREE.Vector3;
+    fromQuaternion: THREE.Quaternion;
+    toQuaternion: THREE.Quaternion;
+    progress: number;
+  } | null = null;
   private hoveredClient = { clientX: 0, clientY: 0 };
   private resizeObserver: ResizeObserver;
+
+  private yaw = 0;
+  private pitch = 0;
+  private readonly velocity = new THREE.Vector3();
+  private jumpOffset = 0;
+  private verticalSpeed = 0;
+  private eyeY = STREET_Y + 1.7;
+  private readonly keys = new Set<string>();
+  private colliders: Collider[] = [];
+  private walkBounds: Rect | null = null;
+  private locked = false;
+  private drag: { id: number; x: number; y: number; moved: boolean; type: string } | null = null;
+  private stick: { id: number; x: number; y: number } | null = null;
+  private readonly stickVector = new THREE.Vector2();
 
   onHover: ((info: HoverInfo | null) => void) | null = null;
   onSelect: ((repo: Repo) => void) | null = null;
@@ -57,25 +107,15 @@ export class TownWorld {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.28;
     this.renderer.domElement.className = 'webgl';
+    this.renderer.domElement.style.touchAction = 'none';
     container.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.FogExp2(0x1b1530, 0.0017);
+    this.scene.fog = new THREE.FogExp2(0x1b1530, 0.002);
 
-    this.camera = new THREE.PerspectiveCamera(42, 1, 0.5, 4000);
-    this.camera.position.set(120, 100, 150);
-
-    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.controls.enableDamping = true;
-    this.controls.dampingFactor = 0.065;
-    this.controls.enablePan = false;
-    this.controls.minDistance = 22;
-    this.controls.maxDistance = 620;
-    this.controls.minPolarAngle = 0.16;
-    this.controls.maxPolarAngle = 1.46;
-    this.controls.autoRotate = true;
-    this.controls.autoRotateSpeed = 0.24;
-    this.controls.target.set(0, 2, 0);
+    this.camera = new THREE.PerspectiveCamera(70, 1, 0.1, 4000);
+    this.camera.rotation.order = 'YXZ';
+    this.camera.position.set(0, 300, 400);
 
     // ------------------------------------------------------------------- sky --
     const skyGeometry = new THREE.SphereGeometry(1800, 40, 24);
@@ -167,7 +207,8 @@ export class TownWorld {
       new THREE.SphereGeometry(33, 24, 24),
       new THREE.MeshBasicMaterial({ color: 0xfff0d6, fog: false, toneMapped: false }),
     );
-    moon.position.set(-1240, -300, -760);
+    // High enough to be seen from street level.
+    moon.position.set(-1240, 320, -760);
     this.scene.add(moon);
 
     const moonGlowTexture = (() => {
@@ -204,9 +245,9 @@ export class TownWorld {
     this.scene.add(moonGlow);
 
     const nebulae = [
-      { position: new THREE.Vector3(-1050, -360, -820), color: 0x7f5cff, scale: 900, opacity: 0.09 },
-      { position: new THREE.Vector3(580, -420, -1120), color: 0x2f8f9c, scale: 720, opacity: 0.07 },
-      { position: new THREE.Vector3(-60, -520, -1280), color: 0xb06a9a, scale: 1050, opacity: 0.055 },
+      { position: new THREE.Vector3(-1050, 360, -820), color: 0x7f5cff, scale: 900, opacity: 0.09 },
+      { position: new THREE.Vector3(580, 300, -1120), color: 0x2f8f9c, scale: 720, opacity: 0.07 },
+      { position: new THREE.Vector3(-60, 520, -1280), color: 0xb06a9a, scale: 1050, opacity: 0.055 },
     ];
     for (const nebula of nebulae) {
       const sprite = new THREE.Sprite(
@@ -282,13 +323,22 @@ export class TownWorld {
     this.resizeObserver.observe(container);
     this.resize();
 
+    const canvas = this.renderer.domElement;
     window.addEventListener('pointermove', this.handlePointerMove);
     window.addEventListener('pointerdown', this.handlePointerDown);
     window.addEventListener('pointerup', this.handlePointerUp);
-    this.renderer.domElement.addEventListener('pointerleave', this.handlePointerLeave);
-    this.renderer.domElement.addEventListener('wheel', this.handleInteraction, { passive: true });
-    this.controls.addEventListener('start', this.handleInteraction);
-    this.renderer.domElement.style.cursor = 'grab';
+    window.addEventListener('pointercancel', this.handlePointerUp);
+    window.addEventListener('keydown', this.handleKeyDown);
+    window.addEventListener('keyup', this.handleKeyUp);
+    window.addEventListener('blur', () => this.keys.clear());
+    canvas.addEventListener('pointerleave', this.handlePointerLeave);
+    canvas.addEventListener('contextmenu', (event) => event.preventDefault());
+    document.addEventListener('pointerlockchange', this.handleLockChange);
+    canvas.style.cursor = 'crosshair';
+
+    this.joystickEl = document.getElementById('joystick');
+    this.joystickKnob = this.joystickEl?.querySelector<HTMLElement>('.joystick-knob') ?? null;
+    this.joystickEl?.addEventListener('pointerdown', this.handleStickDown);
 
     requestAnimationFrame(this.animate);
   }
@@ -298,40 +348,57 @@ export class TownWorld {
     this.town = town;
     this.scene.add(town.group);
 
+    town.group.updateMatrixWorld(true);
+    const box = new THREE.Box3();
+    this.colliders = town.pickables.map((mesh) => {
+      box.setFromObject(mesh);
+      return { minX: box.min.x, maxX: box.max.x, minZ: box.min.z, maxZ: box.max.z };
+    });
+    this.walkBounds = town.walkBounds;
+
     const { target, radius } = town.view;
-    const aspect = this.camera.aspect;
-    const distance =
-      Math.max(town.layout.island.w, town.layout.island.d) *
-      (aspect < 0.7 ? 1.78 : aspect < 0.9 ? 1.58 : aspect < 1.3 ? 1.18 : 1.06);
-    const direction = new THREE.Vector3(0.62, 0.72, 1).normalize();
-    const end = target.clone().add(direction.clone().multiplyScalar(distance));
-    end.y = Math.max(end.y, 28);
-    const from = target.clone().add(direction.clone().multiplyScalar(distance * 1.3));
-    from.y += 32;
+    const islandSpan = Math.max(town.layout.island.w, town.layout.island.d) * WORLD_SCALE;
 
-    this.controls.target.copy(target);
-    this.controls.target.y = 2.5;
-    this.controls.minDistance = Math.max(18, radius * 0.32);
-    this.controls.maxDistance = Math.max(160, radius * 3.4);
-    this.camera.position.copy(from);
-    this.controls.update();
-    this.intro = { from, to: end, started: performance.now() };
-    this.lastInteraction = performance.now();
+    // Fly in from an overview of the whole town down to street level.
+    const overview = target
+      .clone()
+      .add(new THREE.Vector3(0.62, 0.72, 1).normalize().multiplyScalar(radius * 2.2));
+    this.camera.position.copy(overview);
+    this.camera.lookAt(target);
+    const fromQuaternion = this.camera.quaternion.clone();
 
-    const shadowRadius = Math.max(town.layout.island.w, town.layout.island.d) * 1.05;
-    this.keyLight.position.copy(target).add(new THREE.Vector3(-90, 160, 100));
+    this.eyeY = town.spawn.position.y;
+    this.yaw = town.spawn.yaw;
+    this.pitch = 0.06;
+    this.jumpOffset = 0;
+    this.verticalSpeed = 0;
+    this.velocity.set(0, 0, 0);
+    this.intro = {
+      fromPosition: overview,
+      toPosition: town.spawn.position.clone(),
+      fromQuaternion,
+      toQuaternion: new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'),
+      ),
+      progress: 0,
+    };
+
+    const shadowRadius = islandSpan * 0.6;
+    const keyOffset = new THREE.Vector3(-90, 160, 100).multiplyScalar(WORLD_SCALE);
+    this.keyLight.position.copy(target).add(keyOffset);
     this.keyLight.target.position.copy(target);
     this.keyLight.target.updateMatrixWorld();
-    this.fillLight.position.copy(target).add(new THREE.Vector3(150, 95, 190));
+    this.fillLight.position.copy(target).add(new THREE.Vector3(150, 95, 190).multiplyScalar(WORLD_SCALE));
     this.fillLight.target.position.copy(target);
     this.fillLight.target.updateMatrixWorld();
     this.keyLight.shadow.camera.left = -shadowRadius;
     this.keyLight.shadow.camera.right = shadowRadius;
     this.keyLight.shadow.camera.top = shadowRadius;
     this.keyLight.shadow.camera.bottom = -shadowRadius;
+    this.keyLight.shadow.camera.far = keyOffset.length() + shadowRadius * 2;
     this.keyLight.shadow.camera.updateProjectionMatrix();
 
-    this.scene.fog = new THREE.FogExp2(0x1b1530, 0.55 / (distance * 2.3));
+    this.scene.fog = new THREE.FogExp2(0x1b1530, clamp(1.05 / islandSpan, 0.0011, 0.004));
     this.clearHover();
   }
 
@@ -362,6 +429,7 @@ export class TownWorld {
     textures.forEach((texture) => texture.dispose());
     this.town = null;
     this.hovered = null;
+    this.colliders = [];
   }
 
   private resize(): void {
@@ -373,65 +441,206 @@ export class TownWorld {
     this.composer.setSize(width, height);
   }
 
-  private handleInteraction = (): void => {
-    this.lastInteraction = performance.now();
+  // ------------------------------------------------------------------ input --
+
+  /** Jump straight to street level if the viewer starts acting during the fly-in. */
+  private skipIntro(): void {
+    if (!this.intro) return;
+    this.camera.position.copy(this.intro.toPosition);
     this.intro = null;
+  }
+
+  private requestLock(): void {
+    const canvas = this.renderer.domElement;
+    if (!('requestPointerLock' in canvas)) return;
+    try {
+      const result = canvas.requestPointerLock() as unknown;
+      if (result instanceof Promise) result.catch(() => undefined);
+    } catch {
+      // Pointer lock can be refused (iframes, permissions). Drag-to-look still works.
+    }
+  }
+
+  private handleLockChange = (): void => {
+    this.locked = document.pointerLockElement === this.renderer.domElement;
+    document.body.classList.toggle('fp-locked', this.locked);
+    if (!this.locked) this.keys.clear();
+    this.clearHover();
   };
 
+  private handleKeyDown = (event: KeyboardEvent): void => {
+    if (isTyping() || event.metaKey || event.ctrlKey || event.altKey) return;
+    const movementKeys = [
+      'KeyW', 'KeyA', 'KeyS', 'KeyD',
+      'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+      'Space', 'ShiftLeft', 'ShiftRight',
+    ];
+    if (!movementKeys.includes(event.code)) return;
+    if (!this.town) return;
+    event.preventDefault();
+    this.skipIntro();
+    this.keys.add(event.code);
+  };
+
+  private handleKeyUp = (event: KeyboardEvent): void => {
+    this.keys.delete(event.code);
+  };
+
+  private look(dx: number, dy: number, sensitivity: number): void {
+    this.yaw -= dx * sensitivity;
+    this.pitch = clamp(this.pitch - dy * sensitivity, -1.45, 1.45);
+  }
+
   private handlePointerDown = (event: PointerEvent): void => {
-    this.pointerDown = { x: event.clientX, y: event.clientY };
-    this.lastInteraction = performance.now();
+    if (event.target !== this.renderer.domElement) return;
+    this.skipIntro();
+    if (this.locked) return;
+    if (this.drag) return;
+    this.drag = {
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      moved: false,
+      type: event.pointerType,
+    };
   };
 
   private handlePointerMove = (event: PointerEvent): void => {
+    if (this.locked) {
+      if (!this.intro) this.look(event.movementX, event.movementY, LOOK_SENSITIVITY);
+      return;
+    }
+
+    if (this.stick && event.pointerId === this.stick.id) {
+      this.updateStick(event.clientX, event.clientY);
+      return;
+    }
+
+    if (this.drag && event.pointerId === this.drag.id) {
+      const dx = event.clientX - this.drag.x;
+      const dy = event.clientY - this.drag.y;
+      if (!this.drag.moved && Math.hypot(dx, dy) > 6) this.drag.moved = true;
+      if (this.drag.moved && !this.intro) {
+        this.look(dx, dy, DRAG_SENSITIVITY);
+        this.drag.x = event.clientX;
+        this.drag.y = event.clientY;
+        this.clearHover();
+      }
+      return;
+    }
+
     if (event.target !== this.renderer.domElement) {
       this.clearHover();
       return;
     }
-    this.hoveredClient = { clientX: event.clientX, clientY: event.clientY };
+    if (event.pointerType === 'mouse') this.pickAt(event.clientX, event.clientY);
+  };
+
+  private handlePointerLeave = (): void => {
+    if (!this.locked) this.clearHover();
+  };
+
+  private handlePointerUp = (event: PointerEvent): void => {
+    if (this.stick && event.pointerId === this.stick.id) {
+      this.releaseStick();
+      return;
+    }
+
+    if (this.locked) {
+      if (event.button === 0 && this.hovered) this.onSelect?.(this.hovered.repo);
+      return;
+    }
+
+    const drag = this.drag;
+    if (!drag || drag.id !== event.pointerId) return;
+    this.drag = null;
+    if (drag.moved || event.target !== this.renderer.domElement) return;
+
+    if (drag.type === 'mouse') {
+      // A plain click on the scene captures the mouse for walking.
+      this.requestLock();
+      return;
+    }
+    // Touch: a tap opens whatever building is under the finger.
+    this.pickAt(event.clientX, event.clientY);
+    if (this.hovered) this.onSelect?.(this.hovered.repo);
+  };
+
+  private handleStickDown = (event: PointerEvent): void => {
+    if (!this.joystickEl) return;
+    event.preventDefault();
+    this.skipIntro();
+    const rect = this.joystickEl.getBoundingClientRect();
+    this.stick = {
+      id: event.pointerId,
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2,
+    };
+    this.joystickEl.setPointerCapture?.(event.pointerId);
+    this.updateStick(event.clientX, event.clientY);
+  };
+
+  private updateStick(clientX: number, clientY: number): void {
+    if (!this.stick || !this.joystickEl) return;
+    const radius = this.joystickEl.clientWidth / 2;
+    let dx = (clientX - this.stick.x) / radius;
+    let dy = (clientY - this.stick.y) / radius;
+    const length = Math.hypot(dx, dy);
+    if (length > 1) {
+      dx /= length;
+      dy /= length;
+    }
+    this.stickVector.set(dx, dy);
+    if (this.joystickKnob) {
+      this.joystickKnob.style.transform = `translate(${dx * radius * 0.55}px, ${dy * radius * 0.55}px)`;
+    }
+  }
+
+  private releaseStick(): void {
+    this.stick = null;
+    this.stickVector.set(0, 0);
+    if (this.joystickKnob) this.joystickKnob.style.transform = '';
+  }
+
+  // ---------------------------------------------------------------- picking --
+
+  private pickAt(clientX: number, clientY: number): void {
     if (!this.town) return;
     const rect = this.renderer.domElement.getBoundingClientRect();
     if (
-      event.clientX < rect.left ||
-      event.clientX > rect.right ||
-      event.clientY < rect.top ||
-      event.clientY > rect.bottom
+      clientX < rect.left ||
+      clientX > rect.right ||
+      clientY < rect.top ||
+      clientY > rect.bottom
     ) {
       this.clearHover();
       return;
     }
     this.pointer.set(
-      ((event.clientX - rect.left) / rect.width) * 2 - 1,
-      -((event.clientY - rect.top) / rect.height) * 2 + 1,
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
     );
+    this.pick(clientX, clientY);
+  }
+
+  /** Raycast along `this.pointer` (NDC) and report the building it hits. */
+  private pick(clientX: number, clientY: number): void {
+    if (!this.town) return;
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    const hits = this.raycaster.intersectObjects(this.town.pickables, false);
-    const hit = hits[0];
+    this.raycaster.far = PICK_DISTANCE;
+    const hit = this.raycaster.intersectObjects(this.town.pickables, false)[0];
     const handle = hit?.object.userData.buildingHandle as BuildingHandle | undefined;
     if (handle) {
-      if (handle !== this.hovered) {
-        this.hovered = handle;
-        this.onHover?.({ repo: handle.repo, ...this.hoveredClient });
-      } else {
-        this.onHover?.({ repo: handle.repo, ...this.hoveredClient });
-      }
-      this.renderer.domElement.style.cursor = 'pointer';
+      // While aiming with the crosshair the tooltip does not move; skip redundant updates.
+      if (handle === this.hovered && this.locked) return;
+      this.hovered = handle;
+      this.hoveredClient = { clientX, clientY };
+      this.onHover?.({ repo: handle.repo, ...this.hoveredClient });
+      if (!this.locked) this.renderer.domElement.style.cursor = 'pointer';
     } else {
       this.clearHover();
     }
-  };
-
-  private handlePointerLeave = (): void => {
-    this.clearHover();
-  };
-
-  private handlePointerUp = (event: PointerEvent): void => {
-    const start = this.pointerDown;
-    this.pointerDown = null;
-    if (!start) return;
-    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 6) return;
-    if (this.hovered) this.onSelect?.(this.hovered.repo);
-  };
+  }
 
   private clearHover(): void {
     if (this.hovered) {
@@ -439,7 +648,85 @@ export class TownWorld {
       this.onHover?.(null);
     }
     this.hoverRing.visible = false;
-    this.renderer.domElement.style.cursor = 'grab';
+    this.renderer.domElement.style.cursor = 'crosshair';
+  }
+
+  // --------------------------------------------------------------- movement --
+
+  private collide(x: number, z: number, previousX: number, previousZ: number): { x: number; z: number } {
+    const r = PLAYER_RADIUS;
+    let nextX = x;
+    for (const box of this.colliders) {
+      if (previousZ <= box.minZ - r || previousZ >= box.maxZ + r) continue;
+      if (nextX <= box.minX - r || nextX >= box.maxX + r) continue;
+      // Already inside (e.g. spawned on a tombstone): let the walker out.
+      if (previousX > box.minX - r && previousX < box.maxX + r) continue;
+      nextX = previousX <= box.minX - r ? box.minX - r - 0.001 : box.maxX + r + 0.001;
+    }
+    let nextZ = z;
+    for (const box of this.colliders) {
+      if (nextX <= box.minX - r || nextX >= box.maxX + r) continue;
+      if (nextZ <= box.minZ - r || nextZ >= box.maxZ + r) continue;
+      if (previousZ > box.minZ - r && previousZ < box.maxZ + r) continue;
+      nextZ = previousZ <= box.minZ - r ? box.minZ - r - 0.001 : box.maxZ + r + 0.001;
+    }
+    const bounds = this.walkBounds;
+    if (bounds) {
+      nextX = clamp(nextX, bounds.x - bounds.w / 2, bounds.x + bounds.w / 2);
+      nextZ = clamp(nextZ, bounds.z - bounds.d / 2, bounds.z + bounds.d / 2);
+    }
+    return { x: nextX, z: nextZ };
+  }
+
+  private walk(delta: number): void {
+    const forwardInput =
+      (this.keys.has('KeyW') || this.keys.has('ArrowUp') ? 1 : 0) -
+      (this.keys.has('KeyS') || this.keys.has('ArrowDown') ? 1 : 0) -
+      this.stickVector.y;
+    const strafeInput =
+      (this.keys.has('KeyD') || this.keys.has('ArrowRight') ? 1 : 0) -
+      (this.keys.has('KeyA') || this.keys.has('ArrowLeft') ? 1 : 0) +
+      this.stickVector.x;
+    const running = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
+    const stickPush = Math.hypot(this.stickVector.x, this.stickVector.y);
+    const speed = running || stickPush > 0.92 ? RUN_SPEED : WALK_SPEED;
+
+    const wish = new THREE.Vector3(
+      -Math.sin(this.yaw) * forwardInput + Math.cos(this.yaw) * strafeInput,
+      0,
+      -Math.cos(this.yaw) * forwardInput - Math.sin(this.yaw) * strafeInput,
+    );
+    if (wish.lengthSq() > 1) wish.normalize();
+    wish.multiplyScalar(speed);
+    this.velocity.lerp(wish, 1 - Math.exp(-delta * 9));
+
+    const position = this.camera.position;
+    const next = this.collide(
+      position.x + this.velocity.x * delta,
+      position.z + this.velocity.z * delta,
+      position.x,
+      position.z,
+    );
+    // Kill velocity into walls so the walker slides instead of sticking.
+    if (delta > 0) {
+      this.velocity.x = (next.x - position.x) / delta;
+      this.velocity.z = (next.z - position.z) / delta;
+    }
+
+    if (this.keys.has('Space') && this.jumpOffset <= 0) {
+      this.verticalSpeed = JUMP_SPEED;
+    }
+    if (this.jumpOffset > 0 || this.verticalSpeed > 0) {
+      this.verticalSpeed -= GRAVITY * delta;
+      this.jumpOffset = Math.max(0, this.jumpOffset + this.verticalSpeed * delta);
+      if (this.jumpOffset === 0) this.verticalSpeed = 0;
+    }
+
+    const bob = Math.hypot(this.velocity.x, this.velocity.z) > 0.5 && this.jumpOffset === 0
+      ? Math.sin(performance.now() / 1000 * (running ? 13 : 9)) * (running ? 0.05 : 0.03)
+      : 0;
+    position.set(next.x, this.eyeY + this.jumpOffset + bob, next.z);
+    this.camera.quaternion.setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'));
   }
 
   private animate = (): void => {
@@ -450,41 +737,44 @@ export class TownWorld {
     this.lastFrame = now;
 
     if (this.intro) {
-      const t = clamp((now - this.intro.started) / 2100, 0, 1);
-      const eased = 1 - Math.pow(1 - t, 3);
-      this.camera.position.lerpVectors(this.intro.from, this.intro.to, eased);
+      // Advance by the clamped frame delta, so a slow first frame (shader
+      // compilation) cannot skip the fly-in.
+      this.intro.progress += (delta * 1000) / INTRO_MS;
+      const t = clamp(this.intro.progress, 0, 1);
+      const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      this.camera.position.lerpVectors(this.intro.fromPosition, this.intro.toPosition, eased);
+      this.camera.quaternion.slerpQuaternions(
+        this.intro.fromQuaternion,
+        this.intro.toQuaternion,
+        eased,
+      );
       if (t >= 1) this.intro = null;
+    } else if (this.town) {
+      this.walk(delta);
+      if (this.locked) {
+        // Aim with the crosshair in the middle of the screen.
+        const rect = this.renderer.domElement.getBoundingClientRect();
+        this.pointer.set(0, 0);
+        this.pick(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      }
     }
-
-    const idle = now - this.lastInteraction > 11000;
-    this.controls.autoRotate = !this.intro && idle && !this.hovered;
-    this.controls.update();
 
     if (this.town) {
       this.town.tick(elapsed);
 
-      for (const building of this.town.buildings) {
-        const lift = building === this.hovered ? 0.55 : 0;
-        const targetY = building.baseY + lift;
-        building.group.position.y +=
-          (targetY - building.group.position.y) * Math.min(1, delta * 11);
-      }
-
       if (this.hovered) {
         const handle = this.hovered;
+        const position = handle.group.getWorldPosition(new THREE.Vector3());
         this.hoverRing.visible = true;
-        this.hoverRing.position.set(
-          handle.group.position.x,
-          Math.max(0.42, handle.baseY + 0.32),
-          handle.group.position.z,
-        );
+        this.hoverRing.position.set(position.x, STREET_Y + 0.12, position.z);
         const scale =
-          Math.max(1.1, handle.footprint * 0.82) *
+          Math.max(0.5, handle.footprint * 0.82) *
+          WORLD_SCALE *
           (1 + Math.sin(elapsed * 3.4) * 0.045);
         this.hoverRing.scale.setScalar(scale);
       }
     }
 
     this.composer.render();
-  }
+  };
 }

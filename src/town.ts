@@ -16,12 +16,21 @@ import {
   createWindowTextures,
 } from './textures';
 
+/**
+ * The town is modelled in "design units" and the whole group is scaled up by
+ * WORLD_SCALE, so 1 world unit = 1 metre for the first-person walker: cars are
+ * ~4.5 m long, street lamps ~10 m tall and the tallest towers approach 100 m.
+ */
+export const WORLD_SCALE = 3;
+/** Eye height of the walker, in world metres above the street. */
+export const EYE_HEIGHT = 1.7;
+export const STREET_Y = 0.18 * WORLD_SCALE;
+
 const ACTIVE_CELL = 10.6;
 const ACTIVE_MARGIN = 6;
-const GHOST_CELL = 6.6;
-const GHOST_MARGIN = 4;
-const CEMETERY_CELL = 2.9;
-const TOWN_GAP = 18;
+const RUINS_MARGIN = 4;
+const CEMETERY_CELL = 1.6;
+const CEMETERY_GAP = 5;
 const ISLAND_MARGIN = 16;
 const GROUND_Y = 0.18;
 const GHOST_GROUND_Y = 0.14;
@@ -49,9 +58,12 @@ export interface PlacedRepo {
 export interface TownLayout {
   placed: PlacedRepo[];
   active: GridSection | null;
-  ghost: GridSection | null;
+  /** Union of the ruins and the cemetery: where the ghost atmosphere lives. */
+  ghost: Rect | null;
   ruins: GridSection | null;
   cemetery: GridSection | null;
+  /** Paved street grid: the living town plus the ruins that continue it. */
+  streets: Rect | null;
   island: Rect;
   counts: {
     active: number;
@@ -75,14 +87,25 @@ export interface BuiltTown {
   buildings: BuildingHandle[];
   layout: TownLayout;
   tick: (elapsed: number) => void;
+  /** Everything below is in world (scaled) units. */
   view: {
     target: THREE.Vector3;
     radius: number;
   };
+  spawn: {
+    position: THREE.Vector3;
+    yaw: number;
+  };
+  /** Walkable area: the island top, inset from its edge. */
+  walkBounds: Rect;
 }
 
 function byStars(a: Repo, b: Repo): number {
   return b.stars - a.stars || Date.parse(b.pushedAt) - Date.parse(a.pushedAt);
+}
+
+function byRecentPush(a: Repo, b: Repo): number {
+  return Date.parse(b.pushedAt) - Date.parse(a.pushedAt) || b.stars - a.stars;
 }
 
 function makeGridSection(
@@ -117,125 +140,97 @@ function gridPositions(cols: number, rows: number, cell: number): { x: number; z
     .map(({ x, z }) => ({ x, z }));
 }
 
+function unionRect(rects: (Rect | null)[]): Rect | null {
+  const list = rects.filter((rect): rect is Rect => Boolean(rect));
+  if (!list.length) return null;
+  const minX = Math.min(...list.map((rect) => rect.x - rect.w / 2));
+  const maxX = Math.max(...list.map((rect) => rect.x + rect.w / 2));
+  const minZ = Math.min(...list.map((rect) => rect.z - rect.d / 2));
+  const maxZ = Math.max(...list.map((rect) => rect.z + rect.d / 2));
+  return { x: (minX + maxX) / 2, z: (minZ + maxZ) / 2, w: maxX - minX, d: maxZ - minZ };
+}
+
 export function computeLayout(repos: Repo[]): TownLayout {
   const activeRepos = repos.filter((repo) => !repo.isGhost).sort(byStars);
   const ghostRepos = repos.filter((repo) => repo.isGhost);
-  const staleRepos = ghostRepos.filter((repo) => repo.ghostReason === 'stale').sort(byStars);
+  // Most recently abandoned first, so decay deepens the further you walk west.
+  const staleRepos = ghostRepos.filter((repo) => repo.ghostReason === 'stale').sort(byRecentPush);
   const archivedRepos = ghostRepos.filter((repo) => repo.ghostReason === 'archived').sort(byStars);
-
-  const activeGrid = activeRepos.length
-    ? makeGridSection(activeRepos.length, ACTIVE_CELL, ACTIVE_MARGIN, 1.45)
-    : null;
-  const active: GridSection | null = activeGrid
-    ? { ...activeGrid, x: 0, z: 0 }
-    : null;
-
-  const ruinsGrid = staleRepos.length
-    ? makeGridSection(staleRepos.length, GHOST_CELL, GHOST_MARGIN, 1.55)
-    : null;
-  const cemeteryGrid = archivedRepos.length
-    ? makeGridSection(archivedRepos.length, CEMETERY_CELL, 4, 1.5)
-    : null;
-
-  const bothGhost = Boolean(ruinsGrid && cemeteryGrid);
-  const contentDepth =
-    (ruinsGrid?.d ?? 0) + (cemeteryGrid?.d ?? 0) + (bothGhost ? 6 : 0);
-  const ghostW = Math.max(ruinsGrid?.w ?? 0, cemeteryGrid?.w ?? 0, 13) + 6;
-  const ghostD = contentDepth + 6;
-
-  const ghostX = active
-    ? -(active.w / 2 + TOWN_GAP + ghostW / 2)
-    : 0;
-
-  let ghost: GridSection | null = null;
-  let ruins: GridSection | null = null;
-  let cemetery: GridSection | null = null;
-
-  if (ruinsGrid || cemeteryGrid) {
-    ghost = { x: ghostX, z: 0, w: ghostW, d: ghostD, cols: 0, rows: 0, cell: 0 };
-
-    if (ruinsGrid) {
-      ruins = {
-        ...ruinsGrid,
-        x: ghostX,
-        z: ghostD / 2 - 3 - ruinsGrid.d / 2,
-      };
-    }
-    if (cemeteryGrid) {
-      cemetery = {
-        ...cemeteryGrid,
-        x: ghostX,
-        z: -ghostD / 2 + 3 + cemeteryGrid.d / 2,
-      };
-    }
-  }
 
   const placed: PlacedRepo[] = [];
 
-  if (active) {
+  let active: GridSection | null = null;
+  if (activeRepos.length) {
+    active = { ...makeGridSection(activeRepos.length, ACTIVE_CELL, ACTIVE_MARGIN, 1.45), x: 0, z: 0 };
     const positions = gridPositions(active.cols, active.rows, active.cell);
     activeRepos.forEach((repo, index) => {
       const position = positions[index];
-      if (!position) return;
-      placed.push({ repo, x: position.x, z: active.z + position.z, kind: 'building' });
+      if (position) placed.push({ repo, x: position.x, z: position.z, kind: 'building' });
     });
   }
 
-  if (ruins && staleRepos.length) {
-    const positions = gridPositions(ruins.cols, ruins.rows, ruins.cell);
-    staleRepos.forEach((repo, index) => {
-      const position = positions[index];
-      if (!position) return;
-      placed.push({
-        repo,
-        x: ruins!.x + position.x,
-        z: ruins!.z + position.z,
-        kind: 'building',
+  // The ruins are not a separate town: they continue the living street grid
+  // to the west on the same blocks, so the cross streets run straight through.
+  let ruins: GridSection | null = null;
+  if (staleRepos.length) {
+    if (active) {
+      let rows = Math.max(active.rows, Math.ceil(Math.sqrt(staleRepos.length / 1.3)));
+      if ((rows - active.rows) % 2 !== 0) rows += 1;
+      const cols = Math.ceil(staleRepos.length / rows);
+      const w = cols * ACTIVE_CELL + RUINS_MARGIN * 2;
+      ruins = {
+        cols,
+        rows,
+        cell: ACTIVE_CELL,
+        w,
+        d: rows * ACTIVE_CELL + RUINS_MARGIN * 2,
+        x: active.x - active.w / 2 - w / 2,
+        z: active.z,
+      };
+      const rowOrder = Array.from({ length: rows }, (_, row) => row).sort(
+        (a, b) => Math.abs(a - (rows - 1) / 2) - Math.abs(b - (rows - 1) / 2) || a - b,
+      );
+      let index = 0;
+      for (let col = 0; col < cols; col += 1) {
+        const x = ruins.x + (cols / 2 - col - 0.5) * ACTIVE_CELL;
+        for (const row of rowOrder) {
+          const repo = staleRepos[index];
+          index += 1;
+          if (!repo) break;
+          placed.push({ repo, x, z: ruins.z + (row - (rows - 1) / 2) * ACTIVE_CELL, kind: 'building' });
+        }
+      }
+    } else {
+      ruins = { ...makeGridSection(staleRepos.length, ACTIVE_CELL, RUINS_MARGIN, 1.45), x: 0, z: 0 };
+      const positions = gridPositions(ruins.cols, ruins.rows, ruins.cell);
+      staleRepos.forEach((repo, index) => {
+        const position = positions[index];
+        if (position) placed.push({ repo, x: position.x, z: position.z, kind: 'building' });
       });
-    });
+    }
   }
 
-  if (cemetery && archivedRepos.length) {
-    const positions = gridPositions(cemetery.cols, cemetery.rows, cemetery.cell);
+  let cemetery: GridSection | null = null;
+  if (archivedRepos.length) {
+    const grid = makeGridSection(archivedRepos.length, CEMETERY_CELL, 3, 1.1);
+    const westEdge = unionRect([active, ruins]);
+    const x = westEdge ? westEdge.x - westEdge.w / 2 - CEMETERY_GAP - grid.w / 2 : 0;
+    cemetery = { ...grid, x, z: 0 };
+    const positions = gridPositions(grid.cols, grid.rows, grid.cell);
     archivedRepos.forEach((repo, index) => {
       const position = positions[index];
-      if (!position) return;
-      placed.push({
-        repo,
-        x: cemetery!.x + position.x,
-        z: cemetery!.z + position.z,
-        kind: 'tombstone',
-      });
+      if (position) placed.push({ repo, x: x + position.x, z: position.z, kind: 'tombstone' });
     });
   }
 
-  let minX = 0;
-  let maxX = 0;
-  let minZ = 0;
-  let maxZ = 0;
-  let hasBounds = false;
-  const include = (rect: Rect): void => {
-    if (!hasBounds) {
-      minX = rect.x - rect.w / 2;
-      maxX = rect.x + rect.w / 2;
-      minZ = rect.z - rect.d / 2;
-      maxZ = rect.z + rect.d / 2;
-      hasBounds = true;
-      return;
-    }
-    minX = Math.min(minX, rect.x - rect.w / 2);
-    maxX = Math.max(maxX, rect.x + rect.w / 2);
-    minZ = Math.min(minZ, rect.z - rect.d / 2);
-    maxZ = Math.max(maxZ, rect.z + rect.d / 2);
-  };
-  if (active) include(active);
-  if (ghost) include(ghost);
-
+  const ghost = unionRect([ruins, cemetery]);
+  const streets = unionRect([active, ruins]);
+  const bounds = unionRect([active, ruins, cemetery]) ?? { x: 0, z: 0, w: 20, d: 20 };
   const island: Rect = {
-    x: (minX + maxX) / 2,
-    z: (minZ + maxZ) / 2,
-    w: maxX - minX + ISLAND_MARGIN * 2,
-    d: maxZ - minZ + ISLAND_MARGIN * 2,
+    x: bounds.x,
+    z: bounds.z,
+    w: bounds.w + ISLAND_MARGIN * 2,
+    d: bounds.d + ISLAND_MARGIN * 2,
   };
 
   return {
@@ -244,6 +239,7 @@ export function computeLayout(repos: Repo[]): TownLayout {
     ghost,
     ruins,
     cemetery,
+    streets,
     island,
     counts: {
       active: activeRepos.length,
@@ -279,8 +275,9 @@ function facadeGeometry(
 ): THREE.BoxGeometry {
   const geometry = new THREE.BoxGeometry(width, height, depth);
   const uv = geometry.getAttribute('uv') as THREE.BufferAttribute;
-  const tileW = 8.5;
-  const tileH = 12.5;
+  // One texture tile holds 4x5 windows; size it so a floor is ~3.5 m tall.
+  const tileW = 4.8;
+  const tileH = 5.9;
   const faceSizes = [
     { u: depth, v: height },
     { u: depth, v: height },
@@ -470,10 +467,10 @@ export function buildTown(
     const rng = mulberry32(repo.id ^ hashString(repo.name));
     const ghost = repo.isGhost;
 
-    const starHeight = Math.log2(repo.stars + 2) * 1.9;
+    const starHeight = Math.log2(repo.stars + 2) * 2.3;
     const sizeBoost = clamp(Math.sqrt(repo.size) / 15, 0, 2.1);
-    let height = 3.4 + starHeight + sizeBoost * 0.5 + rng() * 1.8;
-    height = Math.min(height, ghost ? 13.5 : 24);
+    let height = 3.6 + starHeight + sizeBoost * 0.6 + rng() * 2.2;
+    height = Math.min(height, ghost ? 15 : 32);
     if (ghost) height *= 0.72;
     height = Math.max(2.6, height);
 
@@ -649,7 +646,8 @@ export function buildTown(
     const monument = new THREE.Group();
     monument.position.set(x, 0.11, z);
     monument.rotation.y = (rng() - 0.5) * 0.35;
-    monument.scale.setScalar(1.6);
+    // ~1.6 m tall once the world is scaled: a headstone you walk between.
+    monument.scale.setScalar(0.3);
 
     const base = new THREE.Mesh(
       new THREE.BoxGeometry(1.35, 0.18, 0.55),
@@ -701,7 +699,7 @@ export function buildTown(
       group: monument,
       repo,
       baseY: monument.position.y,
-      footprint: 1.4,
+      footprint: 0.4,
       kind: 'tombstone',
     };
     stone.userData.buildingHandle = handle;
@@ -788,29 +786,36 @@ export function buildTown(
     });
   }
 
+  const S = WORLD_SCALE;
+  /** Point lights do not inherit the group scale, so scale range and power here. */
+  const pointLight = (color: THREE.ColorRepresentation, intensity: number, distance: number) =>
+    new THREE.PointLight(color, intensity * S * S, distance * S, 2);
+  const avenueX = layout.active && layout.ruins ? layout.active.x - layout.active.w / 2 : null;
+  const inRuins = (x: number): boolean =>
+    !layout.active || (avenueX !== null && x < avenueX);
+
   // ----------------------------------------------------------------- plates --
-  if (layout.active) {
-    const active = layout.active;
-    asphaltTexture.repeat.set(active.w / 9, active.d / 9);
+  if (layout.streets) {
+    const streets = layout.streets;
+    asphaltTexture.repeat.set(streets.w / 9, streets.d / 9);
     const plateMaterial = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       map: asphaltTexture,
       roughness: 0.98,
     });
-    const plate = new THREE.Mesh(new THREE.PlaneGeometry(active.w, active.d), plateMaterial);
+    const plate = new THREE.Mesh(new THREE.PlaneGeometry(streets.w, streets.d), plateMaterial);
     plate.rotation.x = -Math.PI / 2;
-    plate.position.set(active.x, 0.045, active.z);
+    plate.position.set(streets.x, 0.045, streets.z);
     plate.receiveShadow = true;
     group.add(plate);
 
-    // Curbs frame the town and keep the eye inside the grid.
     const curbMaterial = new THREE.MeshStandardMaterial({ color: 0x636776, roughness: 1 });
     const curbHeight = 0.3;
     const curbs = [
-      { w: active.w + 0.5, d: 0.5, x: active.x, z: active.z - active.d / 2 },
-      { w: active.w + 0.5, d: 0.5, x: active.x, z: active.z + active.d / 2 },
-      { w: 0.5, d: active.d + 0.5, x: active.x - active.w / 2, z: active.z },
-      { w: 0.5, d: active.d + 0.5, x: active.x + active.w / 2, z: active.z },
+      { w: streets.w + 0.5, d: 0.5, x: streets.x, z: streets.z - streets.d / 2 },
+      { w: streets.w + 0.5, d: 0.5, x: streets.x, z: streets.z + streets.d / 2 },
+      { w: 0.5, d: streets.d + 0.5, x: streets.x - streets.w / 2, z: streets.z },
+      { w: 0.5, d: streets.d + 0.5, x: streets.x + streets.w / 2, z: streets.z },
     ];
     for (const curb of curbs) {
       const mesh = new THREE.Mesh(
@@ -822,58 +827,114 @@ export function buildTown(
       group.add(mesh);
     }
 
-    // Lane markings.
+    // Lane markings: crisp in the living town, worn away in the ruins.
     const dashGeometry = new THREE.PlaneGeometry(1, 1);
     dashGeometry.rotateX(-Math.PI / 2);
-    const dashMaterial = new THREE.MeshBasicMaterial({
-      color: 0xd3d6df,
-      transparent: true,
-      opacity: 0.52,
-      toneMapped: false,
-    });
-    const dashes: THREE.Matrix4[] = [];
     const dummy = new THREE.Object3D();
-    const lineSpanZ = (active.rows - 1) * active.cell + active.cell;
-    const lineSpanX = (active.cols - 1) * active.cell + active.cell;
-    for (let col = 1; col < active.cols; col += 1) {
-      const x = active.x + (col - active.cols / 2) * active.cell;
-      for (let z = -lineSpanZ / 2 + 1; z < lineSpanZ / 2; z += 2.6) {
-        dummy.position.set(x, 0.07, active.z + z);
-        dummy.rotation.set(0, 0, 0);
-        dummy.scale.set(0.13, 1, 1.05);
-        dummy.updateMatrix();
-        dashes.push(dummy.matrix.clone());
+    const dashRng = mulberry32(0x51ed);
+    const liveDashes: THREE.Matrix4[] = [];
+    const wornDashes: THREE.Matrix4[] = [];
+    const pushDash = (x: number, z: number, alongX: boolean, target: THREE.Matrix4[]): void => {
+      dummy.position.set(x, 0.07, z);
+      dummy.rotation.set(0, alongX ? Math.PI / 2 : 0, 0);
+      dummy.scale.set(0.13, 1, 1.05);
+      dummy.updateMatrix();
+      target.push(dummy.matrix.clone());
+    };
+    const addGridDashes = (section: GridSection, target: THREE.Matrix4[], skip: number): void => {
+      const spanZ = section.rows * section.cell;
+      const spanX = section.cols * section.cell;
+      for (let col = 1; col < section.cols; col += 1) {
+        const x = section.x + (col - section.cols / 2) * section.cell;
+        for (let z = -spanZ / 2 + 1; z < spanZ / 2; z += 2.6) {
+          if (dashRng() < skip) continue;
+          pushDash(x, section.z + z, false, target);
+        }
+      }
+      for (let row = 1; row < section.rows; row += 1) {
+        const z = section.z + (row - section.rows / 2) * section.cell;
+        for (let x = -spanX / 2 + 1; x < spanX / 2; x += 2.6) {
+          if (dashRng() < skip) continue;
+          pushDash(section.x + x, z, true, target);
+        }
+      }
+    };
+    if (layout.active) addGridDashes(layout.active, liveDashes, 0);
+    if (layout.ruins) addGridDashes(layout.ruins, wornDashes, 0.45);
+    if (avenueX !== null) {
+      for (let z = -streets.d / 2 + 2; z < streets.d / 2 - 1; z += 2.6) {
+        pushDash(avenueX, streets.z + z, false, dashRng() < 0.5 ? liveDashes : wornDashes);
       }
     }
-    for (let row = 1; row < active.rows; row += 1) {
-      const z = active.z + (row - active.rows / 2) * active.cell;
-      for (let x = -lineSpanX / 2 + 1; x < lineSpanX / 2; x += 2.6) {
-        dummy.position.set(active.x + x, 0.07, z);
-        dummy.rotation.set(0, Math.PI / 2, 0);
-        dummy.scale.set(0.13, 1, 1.05);
-        dummy.updateMatrix();
-        dashes.push(dummy.matrix.clone());
-      }
+    for (const [matrices, opacity] of [
+      [liveDashes, 0.52],
+      [wornDashes, 0.16],
+    ] as const) {
+      if (!matrices.length) continue;
+      const dashMesh = new THREE.InstancedMesh(
+        dashGeometry,
+        new THREE.MeshBasicMaterial({
+          color: 0xd3d6df,
+          transparent: true,
+          opacity,
+          toneMapped: false,
+        }),
+        matrices.length,
+      );
+      matrices.forEach((matrix, index) => dashMesh.setMatrixAt(index, matrix));
+      dashMesh.instanceMatrix.needsUpdate = true;
+      group.add(dashMesh);
     }
-    const dashMesh = new THREE.InstancedMesh(dashGeometry, dashMaterial, dashes.length);
-    dashes.forEach((matrix, index) => dashMesh.setMatrixAt(index, matrix));
-    dashMesh.instanceMatrix.needsUpdate = true;
-    group.add(dashMesh);
   }
 
   if (layout.ghost) {
+    // Dirt creeps over the asphalt and fades out toward the living town, so
+    // there is no seam: the streets just get dustier the further west you go.
     const ghost = layout.ghost;
-    dirtTexture.repeat.set(ghost.w / 8, ghost.d / 8);
-    const plateMaterial = new THREE.MeshStandardMaterial({
+    const eastReach = layout.active ? 14 : 4;
+    const dirtW = ghost.w + 4 + eastReach;
+    const dirtD = ghost.d + 8;
+    const dirtX = ghost.x - ghost.w / 2 - 4 + dirtW / 2;
+    const alphaCanvas = document.createElement('canvas');
+    alphaCanvas.width = 256;
+    alphaCanvas.height = 256;
+    const alphaCtx = alphaCanvas.getContext('2d');
+    if (alphaCtx) {
+      const fadeStart = layout.active ? 1 - (eastReach + ghost.w * 0.35) / dirtW : 0.92;
+      const across = alphaCtx.createLinearGradient(0, 0, 256, 0);
+      across.addColorStop(0, '#000');
+      across.addColorStop(0.06, '#fff');
+      across.addColorStop(Math.max(0.07, fadeStart), '#fff');
+      across.addColorStop(1, '#000');
+      alphaCtx.fillStyle = across;
+      alphaCtx.fillRect(0, 0, 256, 256);
+      alphaCtx.globalCompositeOperation = 'multiply';
+      const down = alphaCtx.createLinearGradient(0, 0, 0, 256);
+      down.addColorStop(0, '#000');
+      down.addColorStop(0.1, '#fff');
+      down.addColorStop(0.9, '#fff');
+      down.addColorStop(1, '#000');
+      alphaCtx.fillStyle = down;
+      alphaCtx.fillRect(0, 0, 256, 256);
+    }
+    const alphaMap = new THREE.CanvasTexture(alphaCanvas);
+    dirtTexture.repeat.set(dirtW / 8, dirtD / 8);
+    const dirtMaterial = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       map: dirtTexture,
+      alphaMap,
+      transparent: true,
+      depthWrite: false,
       roughness: 1,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
     });
-    const plate = new THREE.Mesh(new THREE.PlaneGeometry(ghost.w, ghost.d), plateMaterial);
-    plate.rotation.x = -Math.PI / 2;
-    plate.position.set(ghost.x, 0.04, ghost.z);
-    plate.receiveShadow = true;
-    group.add(plate);
+    const dirt = new THREE.Mesh(new THREE.PlaneGeometry(dirtW, dirtD), dirtMaterial);
+    dirt.rotation.x = -Math.PI / 2;
+    dirt.position.set(dirtX, 0.06, ghost.z);
+    dirt.receiveShadow = true;
+    group.add(dirt);
   }
 
   // -------------------------------------------------------------- buildings --
@@ -897,7 +958,8 @@ export function buildTown(
 
   // ----------------------------------------------------------------- street --
   const lampBulbMaterial = new THREE.MeshBasicMaterial({ color: 0xffdfae, toneMapped: false });
-  let lampLightBudget = 3;
+  const deadBulbMaterial = new THREE.MeshStandardMaterial({ color: 0x3a3a40, roughness: 0.5 });
+  let lampLightBudget = 4;
 
   function addLamp(
     x: number,
@@ -906,6 +968,8 @@ export function buildTown(
     glowColor: string,
     withLight: boolean,
   ): void {
+    // Street lights in the abandoned blocks stay switched off.
+    const dead = inRuins(x);
     const lamp = new THREE.Group();
     lamp.position.set(x, 0.18, z);
     const pole = new THREE.Mesh(
@@ -916,10 +980,15 @@ export function buildTown(
     lamp.add(pole);
     const bulb = new THREE.Mesh(
       new THREE.SphereGeometry(0.17, 8, 8),
-      lampBulbMaterial,
+      dead ? deadBulbMaterial : lampBulbMaterial,
     );
     bulb.position.y = 3.35;
     lamp.add(bulb);
+    if (dead) {
+      lamp.rotation.z = (Math.random() - 0.5) * 0.12;
+      group.add(lamp);
+      return;
+    }
     const glow = new THREE.Sprite(
       new THREE.SpriteMaterial({
         map: glowTexture,
@@ -937,19 +1006,19 @@ export function buildTown(
 
     if (withLight && lampLightBudget > 0) {
       lampLightBudget -= 1;
-      const light = new THREE.PointLight(new THREE.Color(color), 7, 20, 2);
+      const light = pointLight(new THREE.Color(color), 7, 20);
       light.position.set(x, 3.3, z);
       group.add(light);
     }
   }
 
-  if (layout.active) {
-    const active = layout.active;
+  if (layout.streets) {
+    const streets = layout.streets;
     const inset = 3.2;
-    const left = active.x - active.w / 2 + inset;
-    const right = active.x + active.w / 2 - inset;
-    const front = active.z + active.d / 2 - inset;
-    const back = active.z - active.d / 2 + inset;
+    const left = streets.x - streets.w / 2 + inset;
+    const right = streets.x + streets.w / 2 - inset;
+    const front = streets.z + streets.d / 2 - inset;
+    const back = streets.z - streets.d / 2 + inset;
     let lampIndex = 0;
     for (let x = left + 4; x < right - 3; x += 12.5) {
       addLamp(x, front, '#ffcf97', '#ffb877', lampIndex % 4 === 0);
@@ -961,6 +1030,10 @@ export function buildTown(
       addLamp(right, z, '#ffcf97', '#ffb877', lampIndex % 4 === 3);
       lampIndex += 1;
     }
+  }
+
+  if (layout.active) {
+    const active = layout.active;
 
     // A couple of cars circling the block.
     const carColors = [0xe8eaf2, 0xff6b6b, 0x6ee7ff];
@@ -1041,7 +1114,8 @@ export function buildTown(
     );
     const fireflyMaterial = new THREE.PointsMaterial({
       color: 0xffd9a0,
-      size: 0.2,
+      // Point size ignores the group scale, so give it in world units.
+      size: 0.2 * S,
       transparent: true,
       opacity: 0.5,
       depthWrite: false,
@@ -1057,47 +1131,6 @@ export function buildTown(
   if (layout.ghost) {
     const ghost = layout.ghost;
 
-    // Fence along the border facing the living town.
-    const fenceX = ghost.x + ghost.w / 2 + 2.2;
-    const fenceStart = ghost.z - ghost.d / 2 + 4;
-    const fenceEnd = ghost.z + ghost.d / 2 - 4;
-    const postGeometry = new THREE.BoxGeometry(0.2, 2.3, 0.2);
-    const railGeometry = new THREE.BoxGeometry(2.4, 0.09, 0.07);
-    const posts: { x: number; z: number; tilt: number; height: number }[] = [];
-    for (let z = fenceStart; z <= fenceEnd; z += 2.4) {
-      if (Math.random() < 0.14) continue;
-      posts.push({
-        x: fenceX + (Math.random() - 0.5) * 0.25,
-        z,
-        tilt: (Math.random() - 0.5) * 0.25,
-        height: 0.8 + Math.random() * 0.35,
-      });
-    }
-    posts.forEach((post, index) => {
-      const mesh = new THREE.Mesh(postGeometry, woodMaterial);
-      mesh.position.set(post.x, 1.15 * post.height, post.z);
-      mesh.rotation.z = post.tilt;
-      mesh.scale.y = post.height;
-      group.add(mesh);
-
-      const next = posts[index + 1];
-      if (next && Math.abs(next.z - post.z) < 3) {
-        for (const railY of [0.95, 1.75]) {
-          if (Math.random() < 0.18) continue;
-          const rail = new THREE.Mesh(railGeometry, woodMaterial);
-          rail.position.set(
-            (post.x + next.x) / 2,
-            railY * post.height,
-            (post.z + next.z) / 2,
-          );
-          rail.rotation.z = (post.tilt + next.tilt) / 2;
-          rail.rotation.y = Math.PI / 2;
-          rail.scale.x = Math.abs(next.z - post.z) / 2.4;
-          group.add(rail);
-        }
-      }
-    });
-
     // Ground mist and drifting spirits.
     const mistMaterial = new THREE.MeshBasicMaterial({
       map: fogTexture,
@@ -1108,8 +1141,9 @@ export function buildTown(
       blending: THREE.AdditiveBlending,
     });
     for (let i = 0; i < 2; i += 1) {
+      // Oversized and soft-edged, so the mist thins out into the living streets.
       const mist = new THREE.Mesh(
-        new THREE.PlaneGeometry(ghost.w * 1.02, ghost.d * 1.02),
+        new THREE.PlaneGeometry(ghost.w * 1.35, ghost.d * 1.35),
         mistMaterial,
       );
       mist.rotation.x = -Math.PI / 2;
@@ -1149,9 +1183,13 @@ export function buildTown(
     }
 
     // A pair of sickly street lights.
+    // Placed on street corners so they never end up inside a ruin.
+    const lampArea = layout.ruins ?? ghost;
+    const lampHalfW = layout.ruins ? (layout.ruins.cols * layout.ruins.cell) / 2 : ghost.w / 2 - 2;
+    const lampHalfD = layout.ruins ? (layout.ruins.rows * layout.ruins.cell) / 2 : ghost.d / 2 - 2;
     const ghostLampSpots = [
-      { x: ghost.x + ghost.w * 0.3, z: ghost.z + ghost.d * 0.32 },
-      { x: ghost.x - ghost.w * 0.24, z: ghost.z - ghost.d * 0.3 },
+      { x: lampArea.x + lampHalfW, z: lampArea.z + lampHalfD },
+      { x: lampArea.x - lampHalfW, z: lampArea.z - lampHalfD },
     ];
     ghostLampSpots.forEach((spot, index) => {
       const lamp = new THREE.Group();
@@ -1184,7 +1222,7 @@ export function buildTown(
       lamp.add(glow);
       group.add(lamp);
 
-      const light = new THREE.PointLight(0x6fffc0, index === 0 ? 9 : 4, 24, 2);
+      const light = pointLight(0x6fffc0, index === 0 ? 9 : 4, 24);
       light.position.set(spot.x + 0.25, 3.0, spot.z);
       group.add(light);
       ghostLights.push({ light, base: light.intensity, phase: index * 2.4 });
@@ -1216,15 +1254,19 @@ export function buildTown(
     rubble.castShadow = true;
     group.add(rubble);
 
-    // Dead trees in and around the ghost town.
-    for (let i = 0; i < 9; i += 1) {
+    // Dead trees in and around the ghost town, kept out of the ruins themselves.
+    const ruinSpots = layout.placed.filter((spot) => spot.repo.isGhost && spot.kind === 'building');
+    let treeAttempts = 0;
+    for (let i = 0; i < 9 && treeAttempts < 200; treeAttempts += 1) {
+      const treeX = ghost.x + (Math.random() - 0.5) * ghost.w * 1.1;
+      const treeZ = ghost.z + (Math.random() - 0.5) * ghost.d * 1.1;
+      if (ruinSpots.some((spot) => Math.abs(spot.x - treeX) < 4.4 && Math.abs(spot.z - treeZ) < 4.4)) {
+        continue;
+      }
+      i += 1;
       const tree = new THREE.Group();
       const height = 2 + Math.random() * 2.4;
-      tree.position.set(
-        ghost.x + (Math.random() - 0.5) * ghost.w * 1.1,
-        0.1,
-        ghost.z + (Math.random() - 0.5) * ghost.d * 1.1,
-      );
+      tree.position.set(treeX, 0.1, treeZ);
       const trunk = new THREE.Mesh(
         new THREE.CylinderGeometry(0.1, 0.22, height, 5),
         woodMaterial,
@@ -1248,8 +1290,8 @@ export function buildTown(
 
   // ------------------------------------------------------------------ trees --
   const exclusionRects: Rect[] = [];
-  if (layout.active) exclusionRects.push(layout.active);
-  if (layout.ghost) exclusionRects.push(layout.ghost);
+  if (layout.streets) exclusionRects.push(layout.streets);
+  if (layout.cemetery) exclusionRects.push(layout.cemetery);
 
   const treePositions: { x: number; z: number; scale: number; tint: number }[] = [];
   const treeTarget = clamp(
@@ -1348,6 +1390,8 @@ export function buildTown(
     const sign = new THREE.Group();
     sign.position.set(x, 0.18, z);
     sign.rotation.z = tilt;
+    // Roadside-billboard size at street level rather than a sky-high banner.
+    sign.scale.setScalar(0.6);
 
     const panelHeight = width / aspect;
     const panel = new THREE.Mesh(
@@ -1392,22 +1436,6 @@ export function buildTown(
       },
     );
   }
-  if (layout.ghost) {
-    addSign(
-      layout.ghost.x,
-      layout.ghost.z + layout.ghost.d / 2 + 5.5,
-      {
-        eyebrow: 'do not enter',
-        title: 'GHOST TOWN',
-        subtitle: `${layout.counts.stale} stale · ${layout.counts.archived} archived`,
-        accent: '#6dffb4',
-        ghost: true,
-      },
-      -0.035,
-      12,
-    );
-  }
-
   // Labels for the most famous buildings in the living town.
   if (layout.active) {
     const famous = layout.placed
@@ -1491,7 +1519,19 @@ export function buildTown(
     }
   };
 
-  const radius = Math.max(layout.island.w, layout.island.d) / 2;
+  group.scale.setScalar(S);
+
+  // Start just outside the main street, facing into town.
+  const home = layout.active ?? layout.ruins ?? layout.cemetery ?? layout.island;
+  const spawn = {
+    position: new THREE.Vector3(
+      home.x * S,
+      0.1 * S + EYE_HEIGHT,
+      (home.z + home.d / 2 + 11) * S,
+    ),
+    yaw: 0,
+  };
+  const walkInset = 7;
   return {
     group,
     pickables,
@@ -1499,8 +1539,15 @@ export function buildTown(
     layout,
     tick,
     view: {
-      target: new THREE.Vector3(layout.island.x, 0, layout.island.z),
-      radius,
+      target: new THREE.Vector3(layout.island.x * S, 0, layout.island.z * S),
+      radius: (Math.max(layout.island.w, layout.island.d) / 2) * S,
+    },
+    spawn,
+    walkBounds: {
+      x: layout.island.x * S,
+      z: layout.island.z * S,
+      w: (layout.island.w - walkInset * 2) * S,
+      d: (layout.island.d - walkInset * 2) * S,
     },
   };
 }

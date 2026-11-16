@@ -180,12 +180,23 @@
       <span id="apiStatusText">GitHub API</span>
     </div>
 
+    <div class="crosshair" aria-hidden="true"></div>
+
+    <div class="lock-prompt" aria-hidden="true">
+      <span data-i18n="hint.start">클릭해서 마을 걷기</span>
+    </div>
+
+    <div class="joystick" id="joystick" aria-hidden="true">
+      <span class="joystick-knob"></span>
+    </div>
+
     <div class="hint" id="hint">
       <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
         <rect x="6" y="2.5" width="12" height="19" rx="6" stroke="currentColor" stroke-width="1.5" />
         <path d="M12 6.5v3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
       </svg>
-      <span data-i18n="hint.text">드래그로 회전 · 스크롤로 확대 · 건물 클릭 시 GitHub로 이동</span>
+      <span class="hint-desktop" data-i18n="hint.text">WASD 이동 · Shift 달리기 · Space 점프 · 건물을 조준하고 클릭하면 GitHub로 이동 · Esc로 커서 해제</span>
+      <span class="hint-touch" data-i18n="hint.touch">왼쪽 아래 스틱으로 이동 · 드래그로 둘러보기 · 건물을 탭하면 GitHub로 이동</span>
     </div>
 
     <div class="tooltip" id="tooltip" role="tooltip" aria-hidden="true">

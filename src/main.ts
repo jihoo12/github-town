@@ -386,6 +386,7 @@ window.addEventListener('keydown', (event) => {
     (active instanceof HTMLElement && active.isContentEditable);
   if (event.key === '/' && !typing) {
     event.preventDefault();
+    if (document.pointerLockElement) document.exitPointerLock();
     ui.els.userInput.focus();
     ui.els.userInput.select();
   }

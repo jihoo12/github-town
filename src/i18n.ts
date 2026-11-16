@@ -45,7 +45,10 @@ const ko = {
   'legend.tombNote': '아카이브된 리포지토리',
   'legend.height': '건물 높이 = 스타 수',
   'legend.color': '건물 색 = 주 언어',
-  'hint.text': '드래그로 회전 · 스크롤로 확대 · 건물 클릭 시 GitHub로 이동',
+  'hint.text':
+    'WASD 이동 · Shift 달리기 · Space 점프 · 건물을 조준하고 클릭하면 GitHub로 이동 · Esc로 커서 해제',
+  'hint.touch': '왼쪽 아래 스틱으로 이동 · 드래그로 둘러보기 · 건물을 탭하면 GitHub로 이동',
+  'hint.start': '클릭해서 마을 걷기',
   'api.demo': '데모 데이터',
   'api.live': 'GitHub API · live',
   'api.remaining': 'GitHub API {remaining}/{limit}',
@@ -145,7 +148,10 @@ const en: Record<MessageKey, string> = {
   'legend.tombNote': 'Archived repositories',
   'legend.height': 'Height = stars',
   'legend.color': 'Color = main language',
-  'hint.text': 'Drag to orbit · scroll to zoom · click a building to open GitHub',
+  'hint.text':
+    'WASD to walk · Shift to run · Space to jump · aim at a building and click to open GitHub · Esc releases the mouse',
+  'hint.touch': 'Move with the stick · drag to look around · tap a building to open GitHub',
+  'hint.start': 'Click to walk the town',
   'api.demo': 'Demo data',
   'api.live': 'GitHub API · live',
   'api.remaining': 'GitHub API {remaining}/{limit}',

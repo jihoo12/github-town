@@ -3,8 +3,8 @@
 **English** · [한국어](README.md)
 
 A web app that turns a GitHub user's repositories into a 3D town. Repositories you
-still maintain become buildings with their lights on; neglected ones drift across
-the fence into the foggy **ghost town**.
+still maintain become buildings with their lights on; neglected ones go dark at the
+western end of the same streets, in the foggy **ghost town**. You walk between them in first person.
 
 - Building height = stars (log scale)
 - Building color = primary language
@@ -59,7 +59,7 @@ Everything is based on `pushed_at` (the last real push).
 | State | Condition | In the town |
 | --- | --- | --- |
 | Active | pushed within 90 days | lit buildings downtown |
-| Ghost (stale) | no push for over 90 days | ruins behind the fence |
+| Ghost (stale) | no push for over 90 days | dark ruins at the west end of the same streets |
 | Ghost (archived) | `archived: true` | tombstones in the ghost town |
 
 To keep the scene readable and fast, at most 150 repositories are rendered in each
@@ -72,8 +72,8 @@ index.html          UI markup (search, profile panel, legend, tooltip, token dia
 src/main.ts         entry point: load flow, cache, token, URL/localStorage state
 src/github.ts       GitHub API calls, fork filter, ghost classification, stats
 src/i18n.ts         Korean/English dictionary and locale switching
-src/town.ts         layout math and 3D geometry (island, buildings, tombstones, fence, lamps, cars)
-src/world.ts        renderer, sky/stars/moon, lights, OrbitControls, bloom, hover/click
+src/town.ts         layout math and 3D geometry (island, buildings, tombstones, lamps, cars)
+src/world.ts        renderer, sky/stars/moon, lights, first-person walking/collision, bloom, aim/click
 src/textures.ts     canvas-generated window/sign/label/ground/fog textures
 src/theme.ts        language colors, number/date formatting, seeded random
 src/ui.ts           DOM rendering plus loading/error/toast state
@@ -83,8 +83,10 @@ src/style.css       all styles and the responsive layout
 
 ## Controls
 
-- Drag to orbit, scroll to zoom
-- Hover a building for repository details, click to open it on GitHub
+- Walk the town in first person. Click the scene to capture the mouse and look around
+- `WASD`/arrow keys to walk, `Shift` to run, `Space` to jump, `Esc` to release the mouse
+- Aim at a building to see repository details, click while aiming to open it on GitHub
+- On touch screens, move with the stick at the bottom left, drag to look, tap a building to open it
 - `/` focuses the search box
 
 ## Technical notes

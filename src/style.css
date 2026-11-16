@@ -1176,3 +1176,106 @@ dialog h2 {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ------------------------------------------------------------ first person */
+
+.crosshair {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  z-index: 8;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: rgba(255, 244, 228, 0.9);
+  box-shadow:
+    0 0 0 1.5px rgba(10, 8, 18, 0.55),
+    0 0 10px rgba(255, 215, 161, 0.5);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+body.fp-locked .crosshair {
+  opacity: 1;
+}
+
+.lock-prompt {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  z-index: 8;
+  transform: translate(-50%, -50%);
+  padding: 10px 18px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(13, 11, 21, 0.62);
+  color: #e9e4f2;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  backdrop-filter: blur(12px);
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+body.fp-locked .lock-prompt {
+  opacity: 0;
+}
+
+/* While walking, the side panels step back so the street fills the view. */
+body.fp-locked .panel,
+body.fp-locked .topbar {
+  opacity: 0.35;
+  transition: opacity 0.3s ease;
+}
+
+.hint-touch {
+  display: none;
+}
+
+.joystick {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .lock-prompt,
+  .hint-desktop {
+    display: none;
+  }
+
+  .hint-touch {
+    display: inline;
+  }
+
+  .joystick {
+    position: fixed;
+    left: 28px;
+    bottom: 76px;
+    z-index: 9;
+    display: grid;
+    place-items: center;
+    width: 112px;
+    height: 112px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 50%;
+    background: rgba(13, 11, 21, 0.42);
+    backdrop-filter: blur(10px);
+    touch-action: none;
+  }
+
+  .joystick-knob {
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    background: rgba(233, 228, 242, 0.75);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    pointer-events: none;
+  }
+}
+
+.hint {
+  max-width: calc(100vw - 32px);
+  white-space: normal;
+  text-align: center;
+}
