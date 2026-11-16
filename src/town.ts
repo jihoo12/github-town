@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Repo, TownData } from './github';
+import type { OrgSummary, Repo, TownData } from './github';
 import {
   clamp,
   formatCompact,
@@ -83,7 +83,10 @@ export interface BuildingHandle {
 
 export interface BuiltTown {
   group: THREE.Group;
+  /** Building and tombstone meshes: aimable, and solid for the walker. */
   pickables: THREE.Mesh[];
+  /** Meshes of the floating organization islands (userData.org). Not solid. */
+  orgPickables: THREE.Mesh[];
   buildings: BuildingHandle[];
   layout: TownLayout;
   tick: (elapsed: number) => void;
@@ -1555,6 +1558,105 @@ export function buildTown(
     }
   };
 
+  // ------------------------------------------------------------ org islands --
+  // Each public organization floats beside the town as a small island with a
+  // few buildings. Aiming at one and clicking travels to that org's town.
+  const orgPickables: THREE.Mesh[] = [];
+  const orgList = (data.orgs ?? []).slice(0, 12);
+  if (orgList.length) {
+    const orgGrassMaterial = new THREE.MeshStandardMaterial({
+      color: 0x4c8462,
+      roughness: 1,
+      flatShading: true,
+    });
+    // Hang them in the sky the walker faces at spawn: above the far half of
+    // the town, at least ~95 units ahead and higher than the tallest tower
+    // (32 units), so they sit ~24 degrees above the horizon in the first view.
+    const rowZ = Math.min(layout.island.z - layout.island.d * 0.15, spawnZ - 95);
+    const spacing = 34;
+    orgList.forEach((org: OrgSummary, index) => {
+      const rng = mulberry32(hashString(org.login));
+      const islet = new THREE.Group();
+      const baseY = 40 + rng() * 6;
+      islet.position.set(
+        spawnX + (index - (orgList.length - 1) / 2) * spacing,
+        baseY,
+        rowZ + (rng() - 0.5) * 14,
+      );
+      const markPickable = (mesh: THREE.Mesh): void => {
+        mesh.userData.org = org;
+        orgPickables.push(mesh);
+      };
+
+      const size = 7 + Math.min(org.repoCount ?? 6, 30) * 0.18;
+      const top = new THREE.Mesh(
+        new THREE.CylinderGeometry(size, size * 0.92, 1.4, 9),
+        orgGrassMaterial,
+      );
+      top.position.y = -0.7;
+      top.receiveShadow = true;
+      islet.add(top);
+      markPickable(top);
+
+      const rock = new THREE.Mesh(new THREE.ConeGeometry(size * 0.92, size * 1.3, 9), rockMaterial);
+      rock.rotation.x = Math.PI;
+      rock.position.y = -1.4 - size * 0.65;
+      islet.add(rock);
+      markPickable(rock);
+
+      const hue = rng();
+      const buildingCount = clamp(org.repoCount ?? 5, 3, 9);
+      for (let i = 0; i < buildingCount; i += 1) {
+        const width = 1.5 + rng() * 1.1;
+        const depth = 1.5 + rng() * 1.1;
+        const height = 2.4 + rng() * 5.5;
+        const color = new THREE.Color().setHSL((hue + rng() * 0.18) % 1, 0.45, 0.55);
+        const building = new THREE.Mesh(
+          facadeGeometry(width, height, depth, rng() * 3, rng() * 3),
+          getSideMaterial(color, false),
+        );
+        const spot = rng() * Math.PI * 2;
+        const reach = Math.sqrt(rng()) * size * 0.6;
+        building.position.set(Math.cos(spot) * reach, height / 2, Math.sin(spot) * reach);
+        building.castShadow = true;
+        islet.add(building);
+        markPickable(building);
+      }
+
+      const accent = `#${new THREE.Color().setHSL(hue, 0.7, 0.72).getHexString()}`;
+      const label = createLabelTexture(
+        org.login,
+        org.repoCount !== undefined
+          ? `organization · ${org.repoCount} repos · click to visit`
+          : 'organization · click to visit',
+        accent,
+        anisotropy,
+      );
+      const sign = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: label.texture,
+          transparent: true,
+          depthWrite: false,
+          toneMapped: false,
+          fog: false,
+        }),
+      );
+      const labelWidth = 18;
+      sign.scale.set(labelWidth, labelWidth / label.aspect, 1);
+      sign.position.y = 12.5;
+      islet.add(sign);
+
+      group.add(islet);
+      floaters.push({
+        object: islet,
+        baseY,
+        phase: rng() * Math.PI * 2,
+        amp: 0.9,
+        spin: (rng() - 0.5) * 0.03,
+      });
+    });
+  }
+
   group.scale.setScalar(S);
 
   // Start just outside the main street, facing into town.
@@ -1579,6 +1681,7 @@ export function buildTown(
   return {
     group,
     pickables,
+    orgPickables,
     buildings,
     layout,
     tick,

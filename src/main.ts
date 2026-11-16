@@ -19,6 +19,8 @@ let currentUser = '';
 let currentData: TownData | null = null;
 let lastErrorView: (() => void) | null = null;
 let controller: AbortController | null = null;
+/** The user whose town we left to visit one of their organizations. */
+let returnTo: string | null = null;
 
 world.onHover = (info) => {
   if (info) {
@@ -31,6 +33,16 @@ world.onHover = (info) => {
 world.onSelect = (repo) => {
   window.open(repo.htmlUrl, '_blank', 'noopener,noreferrer');
 };
+
+world.onHoverOrg = (info) => {
+  if (info) {
+    ui.showOrgTooltip(info.org, info.clientX, info.clientY);
+  } else {
+    ui.hideTooltip();
+  }
+};
+
+world.onSelectOrg = (org) => visitOrg(org.login);
 
 function storageGet(key: string): string | null {
   try {
@@ -127,18 +139,48 @@ function normalizeUser(input: string): string {
   return value.replace(/[?#].*$/, '').replace(/\/+$/, '').trim();
 }
 
-function syncUrl(user: string): void {
+function urlFor(user: string): string {
   const params = new URLSearchParams({ user });
   if (getLocale() !== 'ko') params.set('lang', getLocale());
+  return `${window.location.pathname}?${params.toString()}`;
+}
+
+function syncUrl(user: string): void {
   try {
-    window.history.replaceState(
-      null,
-      '',
-      `${window.location.pathname}?${params.toString()}`,
-    );
+    // Keep the entry's state (the org visit's return target) intact.
+    window.history.replaceState(window.history.state, '', urlFor(user));
   } catch {
     // Ignore URL update failures.
   }
+}
+
+/** Load another town as a new history entry, so the browser's back button returns. */
+function navigateTo(user: string): void {
+  try {
+    // Remember where "← back" leads, so it survives back/forward navigation too.
+    window.history.pushState({ returnTo }, '', urlFor(user));
+  } catch {
+    // Ignore URL update failures.
+  }
+  void loadTown(user);
+}
+
+function visitOrg(login: string): void {
+  if (currentData && !currentData.profile.isOrg) returnTo = currentData.profile.login;
+  navigateTo(login);
+}
+
+/** Going back to the user is a fresh visit to their town, with nothing to return to. */
+function returnToUser(user: string): void {
+  returnTo = null;
+  navigateTo(user);
+}
+
+function updateBackTarget(): void {
+  const login = currentData?.profile.login.toLowerCase();
+  const showBack =
+    Boolean(currentData?.profile.isOrg) && returnTo !== null && returnTo.toLowerCase() !== login;
+  ui.setBackTarget(showBack ? returnTo : null);
 }
 
 function formatResetTime(date: Date | null): string {
@@ -167,6 +209,8 @@ function applyTown(data: TownData): void {
   ui.hideError();
   ui.hideTooltip();
   ui.renderTown(data);
+  if (!data.profile.isOrg) returnTo = null;
+  updateBackTarget();
   ui.setSearchValue(data.profile.login);
   ui.hideLoading();
 
@@ -371,6 +415,7 @@ function applyLocale(locale: Locale): void {
 
   if (currentData) {
     ui.renderTown(currentData);
+    updateBackTarget();
     document.title = `@${currentData.profile.login} · GitHub Town`;
     syncUrl(currentData.profile.login);
   }
@@ -379,6 +424,7 @@ function applyLocale(locale: Locale): void {
 
 ui.els.searchForm.addEventListener('submit', (event) => {
   event.preventDefault();
+  returnTo = null;
   const value = ui.els.userInput.value;
   if (!normalizeUser(value)) {
     ui.els.userInput.focus();
@@ -388,6 +434,23 @@ ui.els.searchForm.addEventListener('submit', (event) => {
 });
 
 ui.els.refreshButton.addEventListener('click', () => reloadCurrent());
+
+ui.els.orgList.addEventListener('click', (event) => {
+  const chip = (event.target as HTMLElement).closest<HTMLElement>('[data-org]');
+  if (chip?.dataset.org) visitOrg(chip.dataset.org);
+});
+
+ui.els.backButton.addEventListener('click', () => {
+  const user = ui.els.backButton.dataset.user;
+  if (user) returnToUser(user);
+});
+
+window.addEventListener('popstate', (event) => {
+  const state = event.state as { returnTo?: string | null } | null;
+  returnTo = state?.returnTo ?? null;
+  const user = normalizeUser(new URLSearchParams(window.location.search).get('user') ?? '');
+  if (user && user.toLowerCase() !== currentUser.toLowerCase()) void loadTown(user);
+});
 ui.els.tokenButton.addEventListener('click', openTokenDialog);
 ui.els.errorTokenButton.addEventListener('click', openTokenDialog);
 ui.els.langButton.addEventListener('click', () => {

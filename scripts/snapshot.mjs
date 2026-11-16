@@ -2,6 +2,9 @@
 // dist/, so the deployed page can open that town without spending the
 // visitor's 60-requests-per-hour GitHub API quota.
 //
+// Each user's public organizations are snapshotted too, so their floating
+// org islands open without an API call as well.
+//
 // Usage: GITHUB_TOKEN=... node scripts/snapshot.mjs <user> [<user> ...]
 // The token stays in CI; only public repository data is written out.
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -27,14 +30,34 @@ let failed = false;
 try {
   const { fetchTown } = await vite.ssrLoadModule('/src/github.ts');
   await mkdir('dist/snapshots', { recursive: true });
+  /** login (lowercase) -> repo count, for towns already written. */
+  const written = new Map();
+
+  const save = async (data) => {
+    // The token's quota means nothing to visitors; mark the data as a snapshot instead.
+    const snapshot = { ...data, rateLimit: null, snapshot: true };
+    const file = `dist/snapshots/${data.profile.login.toLowerCase()}.json`;
+    await writeFile(file, JSON.stringify(snapshot));
+    written.set(data.profile.login.toLowerCase(), data.stats.totalNonFork);
+    console.log(`${file}: ${data.repos.length} repos`);
+  };
+
   for (const user of users) {
     try {
       const data = await fetchTown(user, { token });
-      // The token's quota means nothing to visitors; mark the data as a snapshot instead.
-      const snapshot = { ...data, rateLimit: null, snapshot: true };
-      const file = `dist/snapshots/${data.profile.login.toLowerCase()}.json`;
-      await writeFile(file, JSON.stringify(snapshot));
-      console.log(`${file}: ${data.repos.length} repos`);
+      for (const org of data.orgs ?? []) {
+        const key = org.login.toLowerCase();
+        if (!written.has(key)) {
+          try {
+            await save(await fetchTown(org.login, { token }));
+          } catch (error) {
+            // An org failing only costs its island the repo count.
+            console.warn(`snapshot for org ${org.login} failed:`, error instanceof Error ? error.message : error);
+          }
+        }
+        if (written.has(key)) org.repoCount = written.get(key);
+      }
+      await save(data);
     } catch (error) {
       failed = true;
       console.error(`snapshot for ${user} failed:`, error instanceof Error ? error.message : error);

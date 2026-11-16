@@ -1279,3 +1279,79 @@ body.fp-locked .topbar {
   white-space: normal;
   text-align: center;
 }
+
+/* ------------------------------------------------------------ organizations */
+
+.orgs {
+  margin-top: 15px;
+}
+
+.org-list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+}
+
+.org-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 9px 4px 4px;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.org-chip:hover,
+.org-chip:focus-visible {
+  border-color: rgba(143, 179, 255, 0.4);
+  background: rgba(143, 179, 255, 0.1);
+  color: var(--text);
+}
+
+.org-chip img {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+}
+
+.org-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.back-link {
+  display: block;
+  margin: 0 0 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.back-link:hover,
+.back-link:focus-visible {
+  color: var(--text);
+}
+
+.back-link[hidden],
+.orgs[hidden] {
+  display: none;
+}

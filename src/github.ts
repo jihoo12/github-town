@@ -30,6 +30,17 @@ export interface Profile {
   following: number;
   publicRepos: number;
   htmlUrl: string;
+  /** True for organization accounts (their towns have no orgs of their own). */
+  isOrg?: boolean;
+}
+
+/** A public organization membership, shown as a neighbouring island. */
+export interface OrgSummary {
+  login: string;
+  avatarUrl: string;
+  description: string | null;
+  /** Known when the org's town was pre-fetched into a snapshot. */
+  repoCount?: number;
 }
 
 export interface RateLimitInfo {
@@ -56,6 +67,8 @@ export interface TownData {
   fetchedAt: number;
   /** Set when the data comes from the build-time snapshot instead of a live API call. */
   snapshot?: boolean;
+  /** Public organizations the user belongs to (absent in older cached data). */
+  orgs?: OrgSummary[];
 }
 
 export type GitHubErrorCode =
@@ -118,6 +131,13 @@ interface RawProfile {
   following: number;
   public_repos: number;
   html_url: string;
+  type?: string;
+}
+
+interface RawOrg {
+  login: string;
+  avatar_url: string;
+  description: string | null;
 }
 
 function authHeaders(token: string | null): HeadersInit {
@@ -199,6 +219,7 @@ function mapProfile(raw: RawProfile): Profile {
     following: raw.following,
     publicRepos: raw.public_repos,
     htmlUrl: raw.html_url,
+    isOrg: raw.type === 'Organization',
   };
 }
 
@@ -254,6 +275,23 @@ export async function fetchTown(username: string, options: FetchOptions): Promis
   const reposUrl = (page: number) =>
     `${API}/users/${encoded}/repos?per_page=100&page=${page}&sort=updated&direction=desc`;
 
+  // Memberships are a nice-to-have: a failure here must not break the town.
+  const orgsPromise: Promise<OrgSummary[]> = fetch(`${API}/users/${encoded}/orgs?per_page=100`, {
+    headers,
+  })
+    .then(async (response) => {
+      if (!response.ok) return [];
+      const raw = (await response.json()) as RawOrg[];
+      return Array.isArray(raw)
+        ? raw.map((org) => ({
+            login: org.login,
+            avatarUrl: org.avatar_url,
+            description: org.description,
+          }))
+        : [];
+    })
+    .catch(() => []);
+
   const [profileResponse, firstResponse] = await Promise.all([
     request(profileUrl, headers),
     request(reposUrl(1), headers),
@@ -307,12 +345,16 @@ export async function fetchTown(username: string, options: FetchOptions): Promis
     hidden: allRepos.length - repos.length,
   };
 
+  const profile = mapProfile(profileRaw);
+  const orgs = profile.isOrg ? [] : await orgsPromise;
+
   return {
-    profile: mapProfile(profileRaw),
+    profile,
     repos,
     stats,
     rateLimit,
     fetchedAt: Date.now(),
+    orgs,
   };
 }
 

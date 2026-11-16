@@ -1,4 +1,4 @@
-import type { Repo, TownData } from './github';
+import type { OrgSummary, Repo, TownData } from './github';
 import { GHOST_AFTER_DAYS, summarizeLanguages } from './github';
 import { applyStaticTranslations, getLocale, t } from './i18n';
 import { formatCompact, formatCount, formatDate, languageColor, relativeTime } from './theme';
@@ -30,6 +30,10 @@ export const els = {
   langList: element<HTMLUListElement>('langList'),
   langNote: element<HTMLElement>('langNote'),
   cutNote: element<HTMLElement>('cutNote'),
+  orgSection: element<HTMLElement>('orgSection'),
+  orgList: element<HTMLUListElement>('orgList'),
+  orgNote: element<HTMLElement>('orgNote'),
+  backButton: element<HTMLButtonElement>('backButton'),
 
   apiStatus: element<HTMLElement>('apiStatus'),
   apiStatusText: element<HTMLElement>('apiStatusText'),
@@ -42,6 +46,8 @@ export const els = {
   ttStars: element<HTMLElement>('ttStars'),
   ttLang: element<HTMLElement>('ttLang'),
   ttPushed: element<HTMLElement>('ttPushed'),
+  ttCta: element<HTMLElement>('ttCta'),
+  ttCtaArrow: element<HTMLElement>('ttCtaArrow'),
 
   loading: element<HTMLElement>('loading'),
   loadingTitle: element<HTMLElement>('loadingTitle'),
@@ -141,6 +147,31 @@ export function hideError(): void {
 
 export function renderTown(data: TownData): void {
   const { profile, stats } = data;
+
+  const orgs = data.orgs ?? [];
+  els.orgSection.hidden = orgs.length === 0;
+  els.orgNote.textContent = t('org.note', { count: orgs.length });
+  els.orgList.replaceChildren(
+    ...orgs.map((org) => {
+      const item = document.createElement('li');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'org-chip';
+      button.dataset.org = org.login;
+      button.title = t('org.listTitle', { org: org.login });
+      const avatar = document.createElement('img');
+      avatar.src = org.avatarUrl;
+      avatar.alt = '';
+      avatar.width = 18;
+      avatar.height = 18;
+      avatar.loading = 'lazy';
+      const name = document.createElement('span');
+      name.textContent = org.login;
+      button.append(avatar, name);
+      item.append(button);
+      return item;
+    }),
+  );
 
   renderGhostCutoff();
 
@@ -271,9 +302,34 @@ export function showTooltip(repo: Repo, clientX: number, clientY: number): void 
   els.ttStars.textContent = `★ ${formatCount(repo.stars)}`;
   els.ttStars.className = 'stars';
   els.ttLang.textContent = repo.language ?? t('tooltip.noLanguage');
+  els.ttLang.hidden = false;
+  els.ttPushed.hidden = false;
   els.ttPushed.textContent = t('tooltip.pushed', { when: relativeTime(repo.pushedAt) });
   els.ttPushed.title = formatDate(repo.pushedAt);
+  els.ttCta.textContent = t('tooltip.open');
+  els.ttCtaArrow.textContent = '↗';
 
+  placeTooltip(clientX, clientY);
+}
+
+export function showOrgTooltip(org: OrgSummary, clientX: number, clientY: number): void {
+  els.tooltip.style.setProperty('--accent', '#9fd8ff');
+  els.ttName.textContent = org.login;
+  els.ttBadge.className = 'tooltip-badge';
+  els.ttBadge.textContent = t('org.badge');
+  els.ttDesc.textContent = org.description?.trim() ?? '';
+  els.ttStars.className = '';
+  els.ttStars.textContent = t('org.kind');
+  els.ttLang.textContent =
+    org.repoCount !== undefined ? t('org.repos', { count: formatCount(org.repoCount) }) : '';
+  els.ttLang.hidden = org.repoCount === undefined;
+  els.ttPushed.hidden = true;
+  els.ttCta.textContent = t('org.visit');
+  els.ttCtaArrow.textContent = '→';
+  placeTooltip(clientX, clientY);
+}
+
+function placeTooltip(clientX: number, clientY: number): void {
   els.tooltip.classList.add('visible');
   els.tooltip.setAttribute('aria-hidden', 'false');
 
@@ -317,4 +373,11 @@ export function toast(message: string, duration = 3200): void {
     els.toast.classList.remove('visible');
     toastTimer = null;
   }, duration);
+}
+
+/** Show "← back to @user" while visiting an organization reached from that user's town. */
+export function setBackTarget(user: string | null): void {
+  els.backButton.hidden = !user;
+  els.backButton.dataset.user = user ?? '';
+  els.backButton.textContent = user ? t('org.back', { user }) : '';
 }

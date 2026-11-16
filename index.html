@@ -107,6 +107,8 @@
         <span class="live-dot" title="라이브 데이터" data-i18n-title="panel.live"></span>
       </div>
 
+      <button type="button" class="back-link" id="backButton" hidden></button>
+
       <div class="profile">
         <img id="avatar" class="avatar" alt="" width="46" height="46" />
         <div class="profile-text">
@@ -142,6 +144,13 @@
         </div>
         <div class="lang-bar" id="langBar"></div>
         <ul class="lang-list" id="langList"></ul>
+      </div>
+      <div class="orgs" id="orgSection" hidden>
+        <div class="languages-head">
+          <span data-i18n="org.heading">소속 조직</span>
+          <span id="orgNote">—</span>
+        </div>
+        <ul class="org-list" id="orgList"></ul>
       </div>
       <p class="cut-note" id="cutNote"></p>
     </section>
@@ -210,7 +219,7 @@
         <span id="ttLang"></span>
         <span id="ttPushed"></span>
       </div>
-      <div class="tooltip-cta"><span data-i18n="tooltip.open">GitHub에서 열기</span> <span class="cta-arrow">↗</span></div>
+      <div class="tooltip-cta"><span id="ttCta" data-i18n="tooltip.open">GitHub에서 열기</span> <span class="cta-arrow" id="ttCtaArrow">↗</span></div>
     </div>
 
     <div class="loading" id="loading">

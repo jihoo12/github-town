@@ -92,6 +92,7 @@ src/style.css       all styles and the responsive layout
 - `WASD`/arrow keys to walk, `Shift` to run, `Space` to jump, `Esc` to release the mouse
 - Aim at a building to see repository details, click while aiming to open it on GitHub
 - On touch screens, move with the stick at the bottom left, drag to look, tap a building to open it
+- Public organization memberships float above the town as small islands. Aim at one and click (or pick it in the profile panel) to visit that org's town; `← Back` or the browser's back button returns
 - `/` focuses the search box
 
 ## Technical notes

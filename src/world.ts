@@ -3,12 +3,18 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import type { Repo } from './github';
+import type { OrgSummary, Repo } from './github';
 import { STREET_Y, WORLD_SCALE, type BuiltTown, type BuildingHandle, type Obstacle } from './town';
 import { clamp } from './theme';
 
 export interface HoverInfo {
   repo: Repo;
+  clientX: number;
+  clientY: number;
+}
+
+export interface OrgHoverInfo {
+  org: OrgSummary;
   clientX: number;
   clientY: number;
 }
@@ -28,6 +34,8 @@ const GRAVITY = 17;
 const LOOK_SENSITIVITY = 0.0021;
 const DRAG_SENSITIVITY = 0.0042;
 const PICK_DISTANCE = 320;
+/** Org islands float far off beside the town, so they can be aimed at from further away. */
+const ORG_PICK_DISTANCE = 2500;
 /** Longest distance moved per collision sub-step, so fast runs cannot tunnel through poles. */
 const MAX_STEP = 0.15;
 
@@ -64,6 +72,8 @@ export class TownWorld {
 
   private town: BuiltTown | null = null;
   private hovered: BuildingHandle | null = null;
+  private hoveredOrg: OrgSummary | null = null;
+  private pickTargets: THREE.Object3D[] = [];
   private hoveredClient = { clientX: 0, clientY: 0 };
   private resizeObserver: ResizeObserver;
 
@@ -84,6 +94,8 @@ export class TownWorld {
 
   onHover: ((info: HoverInfo | null) => void) | null = null;
   onSelect: ((repo: Repo) => void) | null = null;
+  onHoverOrg: ((info: OrgHoverInfo | null) => void) | null = null;
+  onSelectOrg: ((org: OrgSummary) => void) | null = null;
 
   get maxAnisotropy(): number {
     return this.renderer.capabilities.getMaxAnisotropy();
@@ -351,6 +363,7 @@ export class TownWorld {
     });
     this.obstacles = town.obstacles;
     this.walkBounds = town.walkBounds;
+    this.pickTargets = [...town.pickables, ...town.orgPickables];
 
     const { target } = town.view;
     const islandSpan = Math.max(town.layout.island.w, town.layout.island.d) * WORLD_SCALE;
@@ -411,6 +424,8 @@ export class TownWorld {
     textures.forEach((texture) => texture.dispose());
     this.town = null;
     this.hovered = null;
+    this.hoveredOrg = null;
+    this.pickTargets = [];
     this.colliders = [];
   }
 
@@ -520,7 +535,7 @@ export class TownWorld {
     }
 
     if (this.locked) {
-      if (event.button === 0 && this.hovered) this.onSelect?.(this.hovered.repo);
+      if (event.button === 0) this.selectHovered();
       return;
     }
 
@@ -536,7 +551,7 @@ export class TownWorld {
     }
     // Touch: a tap opens whatever building is under the finger.
     this.pickAt(event.clientX, event.clientY);
-    if (this.hovered) this.onSelect?.(this.hovered.repo);
+    this.selectHovered();
   };
 
   private handleStickDown = (event: PointerEvent): void => {
@@ -596,15 +611,34 @@ export class TownWorld {
   }
 
   /** Raycast along `this.pointer` (NDC) and report the building it hits. */
+  private selectHovered(): void {
+    if (this.hovered) this.onSelect?.(this.hovered.repo);
+    else if (this.hoveredOrg) this.onSelectOrg?.(this.hoveredOrg);
+  }
+
+  /** Raycast along `this.pointer` (NDC) and report the building or org island it hits. */
   private pick(clientX: number, clientY: number): void {
     if (!this.town) return;
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    this.raycaster.far = PICK_DISTANCE;
-    const hit = this.raycaster.intersectObjects(this.town.pickables, false)[0];
-    const handle = hit?.object.userData.buildingHandle as BuildingHandle | undefined;
-    if (handle) {
+    this.raycaster.far = ORG_PICK_DISTANCE;
+    const hit = this.raycaster.intersectObjects(this.pickTargets, false)[0];
+    const org = hit?.object.userData.org as OrgSummary | undefined;
+    const handle =
+      hit && hit.distance <= PICK_DISTANCE
+        ? (hit.object.userData.buildingHandle as BuildingHandle | undefined)
+        : undefined;
+
+    if (org) {
       // While aiming with the crosshair the tooltip does not move; skip redundant updates.
+      if (org === this.hoveredOrg && this.locked) return;
+      this.clearBuildingHover();
+      this.hoveredOrg = org;
+      this.hoveredClient = { clientX, clientY };
+      this.onHoverOrg?.({ org, ...this.hoveredClient });
+      if (!this.locked) this.renderer.domElement.style.cursor = 'pointer';
+    } else if (handle) {
       if (handle === this.hovered && this.locked) return;
+      this.clearOrgHover();
       this.hovered = handle;
       this.hoveredClient = { clientX, clientY };
       this.onHover?.({ repo: handle.repo, ...this.hoveredClient });
@@ -614,12 +648,24 @@ export class TownWorld {
     }
   }
 
-  private clearHover(): void {
+  private clearBuildingHover(): void {
     if (this.hovered) {
       this.hovered = null;
       this.onHover?.(null);
     }
     this.hoverRing.visible = false;
+  }
+
+  private clearOrgHover(): void {
+    if (this.hoveredOrg) {
+      this.hoveredOrg = null;
+      this.onHoverOrg?.(null);
+    }
+  }
+
+  private clearHover(): void {
+    this.clearBuildingHover();
+    this.clearOrgHover();
     this.renderer.domElement.style.cursor = 'crosshair';
   }
 
