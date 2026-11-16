@@ -4,6 +4,8 @@
 
 **Live: https://jihoo12.github.io/github-town/** (add `?user=<name>` to see anyone else's town)
 
+The deploy workflow pre-fetches jihoo12's town at build time into `snapshots/jihoo12.json`, so visitors do not spend their own API quota on it. Put a token in the repository secret `GH_API_TOKEN` to use it for that fetch (otherwise the built-in Actions token is used).
+
 A web app that turns a GitHub user's repositories into a 3D town. Repositories you
 still maintain become buildings with their lights on; neglected ones go dark at the
 western end of the same streets, in the foggy **ghost town**. You walk between them in first person.

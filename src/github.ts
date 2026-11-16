@@ -54,6 +54,8 @@ export interface TownData {
   stats: TownStats;
   rateLimit: RateLimitInfo | null;
   fetchedAt: number;
+  /** Set when the data comes from the build-time snapshot instead of a live API call. */
+  snapshot?: boolean;
 }
 
 export type GitHubErrorCode =

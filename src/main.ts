@@ -100,6 +100,24 @@ function writeCache(data: TownData): void {
   }
 }
 
+/**
+ * Towns pre-fetched by the deploy workflow (dist/snapshots/<user>.json).
+ * Missing for most users, and absent in dev; any failure just returns null.
+ */
+async function readSnapshot(user: string, signal: AbortSignal): Promise<TownData | null> {
+  try {
+    const response = await fetch(`./snapshots/${encodeURIComponent(user.toLowerCase())}.json`, {
+      signal,
+      cache: 'no-cache',
+    });
+    if (!response.ok || !response.headers.get('content-type')?.includes('json')) return null;
+    const data = (await response.json()) as TownData;
+    return data?.profile?.login && Array.isArray(data.repos) ? data : null;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeUser(input: string): string {
   let value = input.trim().replace(/^@+/, '');
   const fromUrl = value.match(/github\.com\/([^/?#\s]+)/i);
@@ -276,6 +294,18 @@ async function loadTown(rawUser: string, options: { force?: boolean } = {}): Pro
   ui.hideError();
   ui.showLoading(t('loading.build'), `github.com/${user}`);
 
+  // A first visit (no forced refresh) prefers the build-time snapshot when one exists.
+  if (!options.force) {
+    const snapshot = await readSnapshot(user, localController.signal);
+    if (localController.signal.aborted) return;
+    if (snapshot) {
+      if (controller === localController) controller = null;
+      ui.els.buildButton.disabled = false;
+      applyTown(snapshot);
+      return;
+    }
+  }
+
   try {
     const data = await fetchTown(user, {
       token: getToken() || null,
@@ -287,6 +317,12 @@ async function loadTown(rawUser: string, options: { force?: boolean } = {}): Pro
     applyTown(data);
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') return;
+    // Rate limited or offline: fall back to the snapshot if this user has one.
+    const snapshot = await readSnapshot(user, localController.signal);
+    if (snapshot && !localController.signal.aborted) {
+      applyTown(snapshot);
+      return;
+    }
     handleError(error, user);
   } finally {
     if (controller === localController) controller = null;

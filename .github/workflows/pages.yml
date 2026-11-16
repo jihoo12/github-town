@@ -3,6 +3,9 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+  # Rebuild daily so the snapshot (stars, ghost status) stays fresh.
+  schedule:
+    - cron: '17 3 * * *'
   workflow_dispatch:
 
 permissions:
@@ -25,6 +28,17 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      # Pre-fetch jihoo12's town into dist/snapshots/ so visitors do not spend
+      # their own GitHub API quota on the default town. Add a token as the
+      # repository secret GH_API_TOKEN (Settings → Secrets and variables →
+      # Actions); until then the workflow's built-in token is used. The token
+      # is only used here in CI and never ends up in the deployed files.
+      - name: Snapshot the default town
+        run: node scripts/snapshot.mjs jihoo12
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_API_TOKEN || github.token }}
+        # A failed snapshot should not block the deploy; the page falls back to the live API.
+        continue-on-error: true
       - uses: actions/upload-pages-artifact@v5
         with:
           path: dist

@@ -238,6 +238,10 @@ export function renderTown(data: TownData): void {
   if (data.profile.login === 'demo') {
     els.apiStatus.classList.add('demo');
     els.apiStatusText.textContent = t('api.demo');
+  } else if (data.snapshot) {
+    els.apiStatusText.textContent = t('api.snapshot', {
+      when: relativeTime(new Date(data.fetchedAt).toISOString()),
+    });
   } else if (data.rateLimit) {
     const { remaining, limit } = data.rateLimit;
     els.apiStatusText.textContent = t('api.remaining', { remaining, limit });
