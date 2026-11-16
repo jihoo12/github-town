@@ -2,6 +2,8 @@
 
 **English** · [한국어](README.md)
 
+**Live: https://jihoo12.github.io/github-town/** (add `?user=<name>` to see anyone else's town)
+
 A web app that turns a GitHub user's repositories into a 3D town. Repositories you
 still maintain become buildings with their lights on; neglected ones go dark at the
 western end of the same streets, in the foggy **ghost town**. You walk between them in first person.
