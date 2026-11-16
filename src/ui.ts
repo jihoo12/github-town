@@ -309,12 +309,12 @@ export function closeTokenDialog(): void {
   if (els.tokenDialog.open) els.tokenDialog.close();
 }
 
-export function toast(message: string): void {
+export function toast(message: string, duration = 3200): void {
   if (toastTimer !== null) window.clearTimeout(toastTimer);
   els.toast.textContent = message;
   els.toast.classList.add('visible');
   toastTimer = window.setTimeout(() => {
     els.toast.classList.remove('visible');
     toastTimer = null;
-  }, 3200);
+  }, duration);
 }

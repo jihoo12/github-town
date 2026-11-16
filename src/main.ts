@@ -10,6 +10,8 @@ const TOKEN_KEY = 'github-town:token';
 const USER_KEY = 'github-town:user';
 const CACHE_PREFIX = 'github-town:cache:';
 const CACHE_TTL = 10 * 60 * 1000;
+/** Shown by default, and the town to fall back to when the GitHub API is out of reach. */
+const DEFAULT_USER = 'jihoo12';
 
 const world = new TownWorld(ui.els.stage);
 
@@ -323,6 +325,24 @@ async function loadTown(rawUser: string, options: { force?: boolean } = {}): Pro
       applyTown(snapshot);
       return;
     }
+    // Out of API quota (or api.github.com unreachable) for someone else:
+    // show the daily jihoo12 snapshot rather than an empty error screen.
+    const outOfReach =
+      error instanceof GitHubError && (error.code === 'rate-limit' || error.code === 'network');
+    if (outOfReach && user.toLowerCase() !== DEFAULT_USER) {
+      const fallback = await readSnapshot(DEFAULT_USER, localController.signal);
+      if (fallback && !localController.signal.aborted) {
+        applyTown(fallback);
+        ui.toast(
+          t(error.code === 'rate-limit' ? 'toast.fallbackRate' : 'toast.fallbackNetwork', {
+            user,
+            fallback: DEFAULT_USER,
+          }),
+          6500,
+        );
+        return;
+      }
+    }
     handleError(error, user);
   } finally {
     if (controller === localController) controller = null;
@@ -335,7 +355,7 @@ function openTokenDialog(): void {
 }
 
 function reloadCurrent(): void {
-  const target = currentUser || normalizeUser(ui.els.userInput.value) || 'jihoo12';
+  const target = currentUser || normalizeUser(ui.els.userInput.value) || DEFAULT_USER;
   if (target === 'demo') {
     void loadTown('demo', { force: true });
     return;
@@ -375,12 +395,18 @@ ui.els.langButton.addEventListener('click', () => {
 });
 
 ui.els.retryButton.addEventListener('click', () => {
-  const target = currentUser || ui.els.userInput.value || 'jihoo12';
+  const target = currentUser || ui.els.userInput.value || DEFAULT_USER;
   void loadTown(target, { force: true });
 });
 
-ui.els.demoButton.addEventListener('click', () => {
-  void loadTown('demo', { force: true });
+/** The error card's fallback: jihoo12's daily snapshot, or the demo town if there is none (e.g. dev). */
+ui.els.demoButton.addEventListener('click', async () => {
+  const snapshot = await readSnapshot(DEFAULT_USER, new AbortController().signal);
+  if (snapshot) {
+    applyTown(snapshot);
+  } else {
+    void loadTown('demo', { force: true });
+  }
 });
 
 ui.els.tokenForm.addEventListener('submit', (event) => {
@@ -436,7 +462,7 @@ const params = new URLSearchParams(window.location.search);
 const initialUser =
   normalizeUser(params.get('user') ?? '') ||
   normalizeUser(storageGet(USER_KEY) ?? '') ||
-  'jihoo12';
+  DEFAULT_USER;
 
 ui.setSearchValue(initialUser);
 void loadTown(initialUser);
