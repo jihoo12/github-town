@@ -82,7 +82,8 @@ export class GitHubError extends Error {
 }
 
 const API = 'https://api.github.com';
-const GHOST_AFTER_DAYS = 30;
+/** A repository with no push for this many days moves to the ghost town. */
+export const GHOST_AFTER_DAYS = 90;
 const MAX_PAGES = 5;
 const MAX_ACTIVE = 150;
 const MAX_GHOST = 150;

@@ -1,4 +1,4 @@
-import type { Profile, Repo, TownData } from './github';
+import { GHOST_AFTER_DAYS, type Profile, type Repo, type TownData } from './github';
 
 const now = Date.now();
 const daysAgo = (days: number, hours = 0): string =>
@@ -152,7 +152,7 @@ const stale: DemoSpec[] = [
     stars: 64,
     language: 'Ruby',
     size: 1200,
-    pushed: 58,
+    pushed: 128,
   },
   {
     id: 202,
@@ -161,7 +161,7 @@ const stale: DemoSpec[] = [
     stars: 210,
     language: 'Rust',
     size: 2400,
-    pushed: 91,
+    pushed: 172,
   },
   {
     id: 203,
@@ -170,7 +170,7 @@ const stale: DemoSpec[] = [
     stars: 14,
     language: 'JavaScript',
     size: 380,
-    pushed: 143,
+    pushed: 244,
   },
   {
     id: 204,
@@ -179,7 +179,7 @@ const stale: DemoSpec[] = [
     stars: 38,
     language: 'C++',
     size: 560,
-    pushed: 210,
+    pushed: 328,
   },
   {
     id: 205,
@@ -188,7 +188,7 @@ const stale: DemoSpec[] = [
     stars: 6,
     language: 'GDScript',
     size: 900,
-    pushed: 401,
+    pushed: 520,
   },
 ];
 
@@ -243,8 +243,12 @@ function toRepo(spec: DemoSpec, index: number): Repo {
     pushedAt,
     updatedAt: pushedAt,
     size: spec.size,
-    isGhost: (spec.archived ?? false) || spec.pushed > 30,
-    ghostReason: spec.archived ? 'archived' : spec.pushed > 30 ? 'stale' : null,
+    isGhost: (spec.archived ?? false) || spec.pushed > GHOST_AFTER_DAYS,
+    ghostReason: spec.archived
+      ? 'archived'
+      : spec.pushed > GHOST_AFTER_DAYS
+        ? 'stale'
+        : null,
   };
 }
 

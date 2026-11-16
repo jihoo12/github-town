@@ -1,5 +1,5 @@
 import type { Repo, TownData } from './github';
-import { summarizeLanguages } from './github';
+import { GHOST_AFTER_DAYS, summarizeLanguages } from './github';
 import { formatCompact, formatCount, formatDate, languageColor, relativeTime } from './theme';
 
 function element<T extends HTMLElement>(id: string): T {
@@ -118,6 +118,10 @@ export function hideError(): void {
 
 export function renderTown(data: TownData): void {
   const { profile, stats } = data;
+
+  for (const node of document.querySelectorAll<HTMLElement>('[data-ghost-days]')) {
+    node.textContent = String(GHOST_AFTER_DAYS);
+  }
 
   els.avatar.style.visibility = '';
   els.avatar.src = profile.avatarUrl;
