@@ -985,6 +985,7 @@ export function buildTown(
   ): void {
     // Street lights in the abandoned blocks stay switched off.
     const dead = inRuins(x);
+    if (!clearOfCars(x, z)) return;
     const lamp = new THREE.Group();
     lamp.position.set(x, 0.18, z);
     obstacles.push({ x, z, r: 0.12 });
@@ -1028,9 +1029,26 @@ export function buildTown(
     }
   }
 
+  // The cars' loop around the living town. Built before the lamps so lamps can
+  // stay out of the lane.
+  const carCurve = layout.active
+    ? makeRoundedPath(layout.active.w - 7, layout.active.d - 7, 7)
+    : null;
+  const carLane = carCurve ? carCurve.getSpacedPoints(600) : [];
+  /** Car half-width (0.75) + pole radius + a little air. */
+  const LANE_CLEARANCE = 1.2;
+  const clearOfCars = (x: number, z: number): boolean => {
+    if (!layout.active) return true;
+    const localX = x - layout.active.x;
+    const localZ = z - layout.active.z;
+    return carLane.every((point) => Math.hypot(point.x - localX, point.z - localZ) > LANE_CLEARANCE);
+  };
+
   if (layout.streets) {
     const streets = layout.streets;
-    const inset = 3.2;
+    // Lamps stand on the curb side of the ring road; the cars' lane runs
+    // ~2.5-4.3 units in from the edge.
+    const inset = 1.3;
     const left = streets.x - streets.w / 2 + inset;
     const right = streets.x + streets.w / 2 - inset;
     const front = streets.z + streets.d / 2 - inset;
@@ -1053,7 +1071,7 @@ export function buildTown(
 
     // A couple of cars circling the block.
     const carColors = [0xe8eaf2, 0xff6b6b, 0x6ee7ff];
-    const curve = makeRoundedPath(active.w - 7, active.d - 7, 7);
+    const curve = carCurve!;
     carColors.forEach((colorValue, index) => {
       const car = new THREE.Group();
       const bodyMaterial = new THREE.MeshStandardMaterial({
