@@ -1,6 +1,7 @@
 import './style.css';
 import { fetchTown, GitHubError, type TownData } from './github';
 import { DEMO_TOWN } from './demo';
+import { detectLocale, getLocale, setLocale, t, type Locale } from './i18n';
 import { buildTown, computeLayout } from './town';
 import { TownWorld } from './world';
 import * as ui from './ui';
@@ -13,6 +14,8 @@ const CACHE_TTL = 10 * 60 * 1000;
 const world = new TownWorld(ui.els.stage);
 
 let currentUser = '';
+let currentData: TownData | null = null;
+let lastErrorView: (() => void) | null = null;
 let controller: AbortController | null = null;
 
 world.onHover = (info) => {
@@ -58,8 +61,8 @@ function getToken(): string {
 function updateTokenButton(): void {
   ui.els.tokenButton.classList.toggle('has-token', Boolean(getToken()));
   ui.els.tokenButton.title = getToken()
-    ? 'GitHub 토큰 설정됨 — 클릭해서 변경'
-    : 'GitHub 토큰 설정';
+    ? t('token.buttonActive')
+    : t('token.button');
 }
 
 function cacheKey(user: string): string {
@@ -104,16 +107,42 @@ function normalizeUser(input: string): string {
   return value.replace(/[?#].*$/, '').replace(/\/+$/, '').trim();
 }
 
+function syncUrl(user: string): void {
+  const params = new URLSearchParams({ user });
+  if (getLocale() !== 'ko') params.set('lang', getLocale());
+  try {
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}?${params.toString()}`,
+    );
+  } catch {
+    // Ignore URL update failures.
+  }
+}
+
 function formatResetTime(date: Date | null): string {
-  if (!date || Number.isNaN(date.getTime())) return '잠시 후';
-  return new Intl.DateTimeFormat('ko-KR', {
+  if (!date || Number.isNaN(date.getTime())) return t('error.resetSoon');
+  return new Intl.DateTimeFormat(getLocale() === 'ko' ? 'ko-KR' : 'en-US', {
     hour: '2-digit',
     minute: '2-digit',
   }).format(date);
 }
 
+function showEmptyTownError(): void {
+  ui.showError({
+    title: t('error.emptyTownTitle'),
+    message: t('error.emptyTownBody'),
+    showRetry: true,
+    showDemo: true,
+    showToken: false,
+  });
+}
+
 function applyTown(data: TownData): void {
+  currentData = data;
   currentUser = data.profile.login;
+  lastErrorView = null;
 
   ui.hideError();
   ui.hideTooltip();
@@ -123,14 +152,8 @@ function applyTown(data: TownData): void {
 
   const layout = computeLayout(data.repos);
   if (layout.placed.length === 0) {
-    ui.showError({
-      title: '지을 마을이 없어요',
-      message:
-        '포크를 제외한 공개 리포지토리가 없습니다.\n다른 사용자를 검색하거나 데모 타운을 둘러보세요.',
-      showRetry: true,
-      showDemo: true,
-      showToken: false,
-    });
+    lastErrorView = showEmptyTownError;
+    showEmptyTownError();
     return;
   }
 
@@ -139,15 +162,10 @@ function applyTown(data: TownData): void {
 
   storageSet(USER_KEY, data.profile.login);
   document.title = `@${data.profile.login} · GitHub Town`;
-  const url = `${window.location.pathname}?user=${encodeURIComponent(data.profile.login)}`;
-  try {
-    window.history.replaceState(null, '', url);
-  } catch {
-    // Ignore URL update failures.
-  }
+  syncUrl(data.profile.login);
 }
 
-function handleError(error: unknown, username: string): void {
+function showFailure(error: unknown, username: string): void {
   ui.hideLoading();
   ui.hideTooltip();
 
@@ -155,9 +173,8 @@ function handleError(error: unknown, username: string): void {
     switch (error.code) {
       case 'not-found':
         ui.showError({
-          title: `@${username}님을 찾을 수 없어요`,
-          message:
-            'GitHub 사용자 이름의 철자를 확인해 주세요.\n비공개 프로필이거나 존재하지 않는 계정일 수 있습니다.',
+          title: t('error.notFoundTitle', { user: username }),
+          message: t('error.notFoundBody'),
           showRetry: true,
           showDemo: true,
           showToken: false,
@@ -165,8 +182,8 @@ function handleError(error: unknown, username: string): void {
         return;
       case 'rate-limit':
         ui.showError({
-          title: 'GitHub API 한도에 걸렸어요',
-          message: `호출 한도를 모두 사용했습니다. ${formatResetTime(error.resetAt)}에 다시 채워집니다.\n토큰을 추가하면 시간당 5,000번까지 사용할 수 있어요.`,
+          title: t('error.rateTitle'),
+          message: t('error.rateBody', { time: formatResetTime(error.resetAt) }),
           showRetry: true,
           showDemo: true,
           showToken: true,
@@ -174,9 +191,8 @@ function handleError(error: unknown, username: string): void {
         return;
       case 'unauthorized':
         ui.showError({
-          title: '토큰을 확인해 주세요',
-          message:
-            '저장된 토큰이 만료되었거나 권한이 없습니다.\n토큰을 다시 설정하거나 삭제한 뒤 시도해 주세요.',
+          title: t('error.authTitle'),
+          message: t('error.authBody'),
           showRetry: true,
           showDemo: true,
           showToken: true,
@@ -184,9 +200,8 @@ function handleError(error: unknown, username: string): void {
         return;
       case 'network':
         ui.showError({
-          title: 'GitHub에 연결하지 못했어요',
-          message:
-            '네트워크 연결을 확인한 뒤 다시 시도해 주세요.\n이 브라우저에서 api.github.com에 접근할 수 없을 수도 있습니다.',
+          title: t('error.networkTitle'),
+          message: t('error.networkBody'),
           showRetry: true,
           showDemo: true,
           showToken: false,
@@ -194,8 +209,8 @@ function handleError(error: unknown, username: string): void {
         return;
       case 'empty':
         ui.showError({
-          title: '사용자 이름이 필요해요',
-          message: 'github.com/ 뒤에 오는 사용자 이름을 입력해 주세요.',
+          title: t('error.emptyTitle'),
+          message: t('error.emptyBody'),
           showRetry: false,
           showDemo: true,
           showToken: false,
@@ -203,8 +218,8 @@ function handleError(error: unknown, username: string): void {
         return;
       default:
         ui.showError({
-          title: '마을을 짓지 못했어요',
-          message: error.message,
+          title: t('error.httpTitle'),
+          message: t('error.httpBody', { status: error.status ?? '—' }),
           showRetry: true,
           showDemo: true,
           showToken: false,
@@ -214,7 +229,7 @@ function handleError(error: unknown, username: string): void {
   }
 
   ui.showError({
-    title: '예상치 못한 문제가 생겼어요',
+    title: t('error.unknownTitle'),
     message: error instanceof Error ? error.message : String(error),
     showRetry: true,
     showDemo: true,
@@ -222,16 +237,20 @@ function handleError(error: unknown, username: string): void {
   });
 }
 
+function handleError(error: unknown, username: string): void {
+  lastErrorView = () => showFailure(error, username);
+  showFailure(error, username);
+}
+
+function showMissingUsername(): void {
+  lastErrorView = () => showFailure(new GitHubError('empty', ''), '');
+  lastErrorView();
+}
+
 async function loadTown(rawUser: string, options: { force?: boolean } = {}): Promise<void> {
   const user = normalizeUser(rawUser);
   if (!user) {
-    ui.showError({
-      title: '사용자 이름이 필요해요',
-      message: 'github.com/ 뒤에 오는 사용자 이름을 입력해 주세요.',
-      showRetry: false,
-      showDemo: true,
-      showToken: false,
-    });
+    showMissingUsername();
     return;
   }
 
@@ -255,7 +274,7 @@ async function loadTown(rawUser: string, options: { force?: boolean } = {}): Pro
   controller = localController;
 
   ui.hideError();
-  ui.showLoading('마을을 짓는 중…', `github.com/${user}`);
+  ui.showLoading(t('loading.build'), `github.com/${user}`);
 
   try {
     const data = await fetchTown(user, {
@@ -288,6 +307,20 @@ function reloadCurrent(): void {
   void loadTown(target, { force: true });
 }
 
+/** Switch language without refetching: re-render every dynamic label in place. */
+function applyLocale(locale: Locale): void {
+  setLocale(locale);
+  ui.applyLocaleText();
+  updateTokenButton();
+
+  if (currentData) {
+    ui.renderTown(currentData);
+    document.title = `@${currentData.profile.login} · GitHub Town`;
+    syncUrl(currentData.profile.login);
+  }
+  lastErrorView?.();
+}
+
 ui.els.searchForm.addEventListener('submit', (event) => {
   event.preventDefault();
   const value = ui.els.userInput.value;
@@ -301,6 +334,9 @@ ui.els.searchForm.addEventListener('submit', (event) => {
 ui.els.refreshButton.addEventListener('click', () => reloadCurrent());
 ui.els.tokenButton.addEventListener('click', openTokenDialog);
 ui.els.errorTokenButton.addEventListener('click', openTokenDialog);
+ui.els.langButton.addEventListener('click', () => {
+  applyLocale(getLocale() === 'ko' ? 'en' : 'ko');
+});
 
 ui.els.retryButton.addEventListener('click', () => {
   const target = currentUser || ui.els.userInput.value || 'jihoo12';
@@ -316,10 +352,10 @@ ui.els.tokenForm.addEventListener('submit', (event) => {
   const token = ui.els.tokenInput.value.trim();
   if (token) {
     storageSet(TOKEN_KEY, token);
-    ui.toast('토큰을 저장했어요. 새로고침합니다.');
+    ui.toast(t('toast.tokenSaved'));
   } else {
     storageRemove(TOKEN_KEY);
-    ui.toast('토큰을 삭제했어요.');
+    ui.toast(t('toast.tokenRemoved'));
   }
   updateTokenButton();
   ui.closeTokenDialog();
@@ -330,7 +366,7 @@ ui.els.tokenClear.addEventListener('click', () => {
   storageRemove(TOKEN_KEY);
   updateTokenButton();
   ui.closeTokenDialog();
-  ui.toast('토큰을 삭제했어요.');
+  ui.toast(t('toast.tokenRemoved'));
   reloadCurrent();
 });
 
@@ -355,6 +391,8 @@ window.addEventListener('keydown', (event) => {
   }
 });
 
+setLocale(detectLocale());
+ui.applyLocaleText();
 updateTokenButton();
 
 const params = new URLSearchParams(window.location.search);

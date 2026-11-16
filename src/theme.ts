@@ -1,3 +1,5 @@
+import { getLocale, t } from './i18n';
+
 export const LANGUAGE_COLORS: Record<string, string> = {
   TypeScript: '#3178c6',
   JavaScript: '#f1e05a',
@@ -79,21 +81,21 @@ export function formatCompact(value: number): string {
 
 export function relativeTime(iso: string): string {
   const then = Date.parse(iso);
-  if (Number.isNaN(then)) return '알 수 없음';
+  if (Number.isNaN(then)) return t('rel.unknown');
   const days = Math.floor((Date.now() - then) / 86_400_000);
-  if (days <= 0) return '오늘';
-  if (days === 1) return '어제';
-  if (days < 7) return `${days}일 전`;
-  if (days < 30) return `${Math.floor(days / 7)}주 전`;
-  if (days < 365) return `${Math.floor(days / 30)}개월 전`;
-  if (days < 730) return '1년 전';
-  return `${Math.floor(days / 365)}년 전`;
+  if (days <= 0) return t('rel.today');
+  if (days === 1) return t('rel.yesterday');
+  if (days < 7) return t('rel.days', { n: days });
+  if (days < 30) return t('rel.weeks', { n: Math.floor(days / 7) });
+  if (days < 365) return t('rel.months', { n: Math.floor(days / 30) });
+  if (days < 730) return t('rel.year');
+  return t('rel.years', { n: Math.floor(days / 365) });
 }
 
 export function formatDate(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return '—';
-  return new Intl.DateTimeFormat('ko-KR', {
+  return new Intl.DateTimeFormat(getLocale() === 'ko' ? 'ko-KR' : 'en-US', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',

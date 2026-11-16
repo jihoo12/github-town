@@ -1,5 +1,7 @@
 # GitHub Town
 
+[English](README.en.md) · **한국어**
+
 GitHub 사용자의 리포지토리를 3D 도시로 지어주는 웹 앱입니다.
 최근에 관리되는 리포지토리는 불 켜진 빌딩이 되고, 잊힌 리포지토리는 안개 낀
 **고스트 타운**으로 밀려납니다.
@@ -13,6 +15,10 @@ GitHub 사용자의 리포지토리를 3D 도시로 지어주는 웹 앱입니�
 기본 사용자는 [`jihoo12`](https://github.com/jihoo12)이고, `?user=<이름>` 또는
 검색창으로 다른 사용자의 마을을 지을 수 있습니다. `?user=demo`는 API 없이
 둘러볼 수 있는 데모 타운입니다.
+
+인터페이스는 한국어와 영어를 지원합니다. 헤더의 **KO/EN** 버튼을 누르거나
+`?lang=en` / `?lang=ko`로 지정할 수 있습니다. 선택한 언어는 `localStorage`에
+저장되고, 전환할 때는 API를 다시 호출하지 않고 화면 문구만 즉시 바꿉니다.
 
 ## 실행
 
@@ -65,6 +71,7 @@ npm run typecheck
 index.html          UI 마크업 (검색, 프로필 패널, 범례, 툴팁, 토큰 다이얼로그)
 src/main.ts         앱 진입점: 로드 흐름, 캐시, 토큰, URL/localStorage 상태
 src/github.ts       GitHub API 호출, 포크 제외, 고스트 판정, 통계
+src/i18n.ts         한국어/영어 사전과 언어 전환
 src/town.ts         배치 계산과 3D 지오메트리 (섬, 빌딩, 묘비, 담장, 가로등, 차)
 src/world.ts        렌더러, 하늘/별/달, 조명, OrbitControls, 블룸, 호버/클릭
 src/textures.ts     Canvas로 생성하는 창문/간판/라벨/지면/안개 텍스처

@@ -15,7 +15,7 @@
     />
   </head>
   <body>
-    <div id="stage" aria-label="3D로 표현된 GitHub 마을"></div>
+    <div id="stage" aria-label="3D로 표현된 GitHub 마을" data-i18n-aria="panel.stageAria"></div>
     <div class="vignette" aria-hidden="true"></div>
     <div class="grain" aria-hidden="true"></div>
 
@@ -41,7 +41,7 @@
         </svg>
         <span class="brand-text">
           <strong>GitHub Town</strong>
-          <small>리포지토리로 짓는 도시</small>
+          <small data-i18n="brand.subtitle">리포지토리로 짓는 도시</small>
         </span>
       </a>
 
@@ -54,17 +54,40 @@
           autocapitalize="off"
           placeholder="jihoo12"
           aria-label="GitHub 사용자 이름"
+          data-i18n-aria="search.aria"
         />
-        <button type="submit" id="buildButton">마을 짓기</button>
+        <button type="submit" id="buildButton" data-i18n="search.build">마을 짓기</button>
       </form>
 
       <div class="top-actions">
-        <button class="icon-button" id="refreshButton" title="새로고침" aria-label="새로고침">
+        <button
+          class="icon-button lang-button"
+          id="langButton"
+          title="Switch to English"
+          aria-label="Switch to English"
+        >
+          EN
+        </button>
+        <button
+          class="icon-button"
+          id="refreshButton"
+          title="새로고침"
+          aria-label="새로고침"
+          data-i18n-title="action.refresh"
+          data-i18n-aria="action.refresh"
+        >
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M20 11a8 8 0 1 0-2.3 6.3M20 5v6h-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
         </button>
-        <button class="icon-button" id="tokenButton" title="GitHub 토큰 설정" aria-label="GitHub 토큰 설정">
+        <button
+          class="icon-button"
+          id="tokenButton"
+          title="GitHub 토큰 설정"
+          aria-label="GitHub 토큰 설정"
+          data-i18n-title="token.button"
+          data-i18n-aria="token.button"
+        >
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <circle cx="8" cy="8" r="4" stroke="currentColor" stroke-width="1.8" />
             <path d="m11 11 8 8m-3-3 2-2m-5-1 2-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
@@ -73,10 +96,15 @@
       </div>
     </header>
 
-    <section class="panel profile-panel" id="profilePanel" aria-label="현재 마을 정보">
+    <section
+      class="panel profile-panel"
+      id="profilePanel"
+      aria-label="현재 마을 정보"
+      data-i18n-aria="panel.profileAria"
+    >
       <div class="panel-head">
-        <span class="eyebrow">CURRENT TOWN</span>
-        <span class="live-dot" title="라이브 데이터"></span>
+        <span class="eyebrow" data-i18n="panel.current">CURRENT TOWN</span>
+        <span class="live-dot" title="라이브 데이터" data-i18n-title="panel.live"></span>
       </div>
 
       <div class="profile">
@@ -86,30 +114,30 @@
           <a id="profileLink" href="https://github.com" target="_blank" rel="noreferrer">@—</a>
         </div>
       </div>
-      <p class="bio" id="bio">GitHub 사용자를 입력하면 리포지토리가 도시가 됩니다.</p>
+      <p class="bio" id="bio" data-i18n="bio.placeholder">GitHub 사용자를 입력하면 리포지토리가 도시가 됩니다.</p>
 
       <div class="stat-grid">
         <div class="stat">
           <b id="statRepos">—</b>
-          <span>리포지토리</span>
+          <span data-i18n="stats.repos">리포지토리</span>
         </div>
         <div class="stat">
           <b id="statStars">—</b>
-          <span>별</span>
+          <span data-i18n="stats.stars">별</span>
         </div>
         <div class="stat">
           <b id="statActive" class="active-value">—</b>
-          <span>활성</span>
+          <span data-i18n="stats.active">활성</span>
         </div>
         <div class="stat">
           <b id="statGhost" class="ghost-value">—</b>
-          <span>고스트</span>
+          <span data-i18n="stats.ghost">고스트</span>
         </div>
       </div>
 
       <div class="languages">
         <div class="languages-head">
-          <span>언어</span>
+          <span data-i18n="lang.heading">언어</span>
           <span id="langNote">—</span>
         </div>
         <div class="lang-bar" id="langBar"></div>
@@ -118,25 +146,28 @@
       <p class="cut-note" id="cutNote"></p>
     </section>
 
-    <aside class="panel legend-panel" aria-label="범례">
+    <aside class="panel legend-panel" aria-label="범례" data-i18n-aria="panel.legendAria">
       <div class="panel-head">
         <span class="eyebrow">HOW TO READ</span>
       </div>
       <ul class="legend">
         <li>
           <span class="swatch building"></span>
-          <div><b>활성 리포지토리</b><small>최근 <span data-ghost-days>30</span>일 안에 푸시</small></div>
+          <div><b data-i18n="legend.active">활성 리포지토리</b><small data-ghost-cutoff="active">최근 90일 안에 푸시</small></div>
         </li>
         <li>
           <span class="swatch ghost"></span>
-          <div><b>고스트 타운</b><small><span data-ghost-days>30</span>일 넘게 잊힌 리포지토리</small></div>
+          <div><b data-i18n="legend.ghost">고스트 타운</b><small data-ghost-cutoff="ghost">90일 넘게 잊힌 리포지토리</small></div>
         </li>
         <li>
           <span class="swatch tomb"></span>
-          <div><b>묘비</b><small>아카이브된 리포지토리</small></div>
+          <div><b data-i18n="legend.tomb">묘비</b><small data-i18n="legend.tombNote">아카이브된 리포지토리</small></div>
         </li>
       </ul>
-      <p class="legend-note">건물 높이 = 스타 수<br />건물 색 = 주 언어</p>
+      <p class="legend-note">
+        <span data-i18n="legend.height">건물 높이 = 스타 수</span><br />
+        <span data-i18n="legend.color">건물 색 = 주 언어</span>
+      </p>
       <div class="legend-footer">
         <span>three.js</span>
         <span>·</span>
@@ -154,7 +185,7 @@
         <rect x="6" y="2.5" width="12" height="19" rx="6" stroke="currentColor" stroke-width="1.5" />
         <path d="M12 6.5v3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
       </svg>
-      <span>드래그로 회전 · 스크롤로 확대 · 건물 클릭 시 GitHub로 이동</span>
+      <span data-i18n="hint.text">드래그로 회전 · 스크롤로 확대 · 건물 클릭 시 GitHub로 이동</span>
     </div>
 
     <div class="tooltip" id="tooltip" role="tooltip" aria-hidden="true">
@@ -168,7 +199,7 @@
         <span id="ttLang"></span>
         <span id="ttPushed"></span>
       </div>
-      <div class="tooltip-cta">GitHub에서 열기 <span>↗</span></div>
+      <div class="tooltip-cta"><span data-i18n="tooltip.open">GitHub에서 열기</span> <span class="cta-arrow">↗</span></div>
     </div>
 
     <div class="loading" id="loading">
@@ -180,7 +211,7 @@
         <span style="--h: 26px; --d: 360ms"></span>
         <span style="--h: 34px; --d: 450ms"></span>
       </div>
-      <p id="loadingTitle">첫 마을을 짓는 중…</p>
+      <p id="loadingTitle" data-i18n="loading.title">첫 마을을 짓는 중…</p>
       <span id="loadingSub">github.com/jihoo12</span>
     </div>
 
@@ -189,9 +220,9 @@
       <h2 id="errorTitle">문제가 생겼어요</h2>
       <p id="errorMessage"></p>
       <div class="error-actions">
-        <button type="button" class="primary-button" id="retryButton">다시 시도</button>
-        <button type="button" class="ghost-button" id="demoButton">데모 타운</button>
-        <button type="button" class="ghost-button" id="errorTokenButton">토큰 추가</button>
+        <button type="button" class="primary-button" id="retryButton" data-i18n="error.retry">다시 시도</button>
+        <button type="button" class="ghost-button" id="demoButton" data-i18n="error.demo">데모 타운</button>
+        <button type="button" class="ghost-button" id="errorTokenButton" data-i18n="error.token">토큰 추가</button>
       </div>
     </div>
 
@@ -199,29 +230,30 @@
       <form id="tokenForm" method="dialog">
         <div class="dialog-head">
           <span class="eyebrow">GITHUB TOKEN</span>
-          <button type="button" class="dialog-close" id="tokenClose" aria-label="닫기">×</button>
+          <button type="button" class="dialog-close" id="tokenClose" aria-label="닫기" data-i18n-aria="dialog.close">×</button>
         </div>
-        <h2>호출 한도를 늘려보세요</h2>
-        <p class="dialog-copy">
+        <h2 data-i18n="dialog.title">호출 한도를 늘려보세요</h2>
+        <p class="dialog-copy" data-i18n="dialog.copy">
           토큰 없이도 마을을 지을 수 있지만, GitHub API는 시간당 60번만 호출을 허용합니다.
           Personal access token을 넣으면 5,000번까지 늘어납니다.
         </p>
-        <label class="field-label" for="tokenInput">Personal access token</label>
+        <label class="field-label" for="tokenInput" data-i18n="dialog.label">Personal access token</label>
         <input
           id="tokenInput"
           type="password"
           class="field-input"
           placeholder="github_pat_… 또는 ghp_…"
+          data-i18n-placeholder="dialog.placeholder"
           autocomplete="off"
           spellcheck="false"
         />
-        <p class="fine-print">
+        <p class="fine-print" data-i18n="dialog.fine">
           토큰은 이 브라우저의 localStorage에만 저장되며, 서버로 전송되지 않습니다.
           공개 리포지토리만 읽는다면 추가 권한은 필요 없습니다.
         </p>
         <div class="dialog-actions">
-          <button type="button" class="ghost-button" id="tokenClear">토큰 삭제</button>
-          <button type="submit" class="primary-button">저장하고 새로고침</button>
+          <button type="button" class="ghost-button" id="tokenClear" data-i18n="dialog.clear">토큰 삭제</button>
+          <button type="submit" class="primary-button" data-i18n="dialog.save">저장하고 새로고침</button>
         </div>
       </form>
     </dialog>

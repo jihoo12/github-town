@@ -1,3 +1,4 @@
+import { t } from './i18n';
 import { languageColor } from './theme';
 
 export interface Repo {
@@ -245,7 +246,7 @@ export async function fetchTown(username: string, options: FetchOptions): Promis
 
   const headers = authHeaders(token);
   const encoded = encodeURIComponent(user);
-  onProgress?.('프로필을 불러오는 중…');
+  onProgress?.(t('progress.profile'));
 
   const profileUrl = `${API}/users/${encoded}`;
   const reposUrl = (page: number) =>
@@ -268,7 +269,7 @@ export async function fetchTown(username: string, options: FetchOptions): Promis
 
   if (firstRepos.length === 100) {
     for (let page = 2; page <= MAX_PAGES; page += 1) {
-      onProgress?.(`리포지토리 ${rawRepos.length}개 불러오는 중…`);
+      onProgress?.(t('progress.repos', { count: rawRepos.length }));
       const response = await request(reposUrl(page), headers);
       const batch = (await response.json()) as RawRepo[];
       rawRepos.push(...batch);
@@ -277,7 +278,7 @@ export async function fetchTown(username: string, options: FetchOptions): Promis
     }
   }
 
-  onProgress?.('도시를 짓는 중…');
+  onProgress?.(t('progress.building'));
 
   const allRepos = rawRepos
     .filter((repo) => !repo.fork)

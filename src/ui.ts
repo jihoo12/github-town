@@ -1,5 +1,6 @@
 import type { Repo, TownData } from './github';
 import { GHOST_AFTER_DAYS, summarizeLanguages } from './github';
+import { applyStaticTranslations, getLocale, t } from './i18n';
 import { formatCompact, formatCount, formatDate, languageColor, relativeTime } from './theme';
 
 function element<T extends HTMLElement>(id: string): T {
@@ -15,6 +16,7 @@ export const els = {
   buildButton: element<HTMLButtonElement>('buildButton'),
   refreshButton: element<HTMLButtonElement>('refreshButton'),
   tokenButton: element<HTMLButtonElement>('tokenButton'),
+  langButton: element<HTMLButtonElement>('langButton'),
 
   avatar: element<HTMLImageElement>('avatar'),
   displayName: element<HTMLElement>('displayName'),
@@ -68,6 +70,27 @@ export function setSearchValue(value: string): void {
   els.userInput.value = value;
 }
 
+/** Re-apply every static label after a locale change. */
+export function applyLocaleText(): void {
+  applyStaticTranslations();
+  renderGhostCutoff();
+  updateLangButton();
+}
+
+export function updateLangButton(): void {
+  const next = getLocale() === 'ko' ? 'en' : 'ko';
+  els.langButton.textContent = next.toUpperCase();
+  els.langButton.title = t('lang.switch');
+  els.langButton.setAttribute('aria-label', t('lang.switch'));
+}
+
+function renderGhostCutoff(): void {
+  for (const node of document.querySelectorAll<HTMLElement>('[data-ghost-cutoff]')) {
+    const key = node.dataset.ghostCutoff === 'ghost' ? 'legend.ghostNote' : 'legend.activeNote';
+    node.textContent = t(key, { days: GHOST_AFTER_DAYS });
+  }
+}
+
 export function showLoading(title: string, subtitle: string): void {
   if (loadingTimer !== null) {
     window.clearTimeout(loadingTimer);
@@ -119,13 +142,11 @@ export function hideError(): void {
 export function renderTown(data: TownData): void {
   const { profile, stats } = data;
 
-  for (const node of document.querySelectorAll<HTMLElement>('[data-ghost-days]')) {
-    node.textContent = String(GHOST_AFTER_DAYS);
-  }
+  renderGhostCutoff();
 
   els.avatar.style.visibility = '';
   els.avatar.src = profile.avatarUrl;
-  els.avatar.alt = `${profile.name}의 아바타`;
+  els.avatar.alt = t('profile.avatarAlt', { name: profile.name });
   els.avatar.onerror = () => {
     els.avatar.onerror = null;
     els.avatar.style.visibility = 'hidden';
@@ -134,16 +155,19 @@ export function renderTown(data: TownData): void {
   els.displayName.textContent = profile.name || profile.login;
   els.profileLink.textContent = `@${profile.login}`;
   els.profileLink.href = profile.htmlUrl;
-  els.bio.textContent = profile.bio?.trim() || '아직 소개가 없습니다.';
+  els.bio.textContent = profile.bio?.trim() || t('bio.empty');
 
   els.statRepos.textContent = formatCount(stats.totalNonFork);
-  els.statRepos.title = `${formatCount(stats.totalNonFork)} non-fork repositories`;
+  els.statRepos.title = t('stats.reposTitle', { count: formatCount(stats.totalNonFork) });
   els.statStars.textContent = formatCompact(stats.stars);
-  els.statStars.title = `${formatCount(stats.stars)} stars`;
+  els.statStars.title = t('stats.starsTitle', { count: formatCount(stats.stars) });
   els.statActive.textContent = formatCount(stats.active);
-  els.statActive.title = `${formatCount(stats.active)} recently pushed repositories`;
+  els.statActive.title = t('stats.activeTitle', {
+    count: formatCount(stats.active),
+    days: GHOST_AFTER_DAYS,
+  });
   els.statGhost.textContent = formatCount(stats.ghost);
-  els.statGhost.title = `${formatCount(stats.ghost)} abandoned repositories`;
+  els.statGhost.title = t('stats.ghostTitle', { count: formatCount(stats.ghost) });
 
   const languages = summarizeLanguages(data.repos).filter(
     (stat) => stat.language !== null,
@@ -165,7 +189,7 @@ export function renderTown(data: TownData): void {
     const segment = document.createElement('span');
     segment.style.width = `${Math.max(restPercent, 1.6)}%`;
     segment.style.backgroundColor = '#4f4a5e';
-    segment.title = `기타 · ${formatCount(restCount)}`;
+    segment.title = `${t('lang.other')} · ${formatCount(restCount)}`;
     els.langBar.append(segment);
   }
 
@@ -191,7 +215,7 @@ export function renderTown(data: TownData): void {
     dot.style.backgroundColor = '#4f4a5e';
     const name = document.createElement('span');
     name.className = 'name';
-    name.textContent = '기타';
+    name.textContent = t('lang.other');
     const count = document.createElement('span');
     count.className = 'count';
     count.textContent = formatCount(restCount);
@@ -200,12 +224,12 @@ export function renderTown(data: TownData): void {
   }
 
   els.langNote.textContent = languages.length
-    ? `${languages.length}개 언어`
-    : '언어 없음';
+    ? t('lang.note', { count: languages.length })
+    : t('lang.none');
 
   if (stats.hidden > 0) {
     els.cutNote.hidden = false;
-    els.cutNote.textContent = `공간 제한으로 ${formatCount(stats.hidden)}개 리포지토리는 표시하지 않았습니다.`;
+    els.cutNote.textContent = t('cut.note', { count: formatCount(stats.hidden) });
   } else {
     els.cutNote.hidden = true;
   }
@@ -213,13 +237,13 @@ export function renderTown(data: TownData): void {
   els.apiStatus.classList.remove('warning', 'demo');
   if (data.profile.login === 'demo') {
     els.apiStatus.classList.add('demo');
-    els.apiStatusText.textContent = '데모 데이터';
+    els.apiStatusText.textContent = t('api.demo');
   } else if (data.rateLimit) {
     const { remaining, limit } = data.rateLimit;
-    els.apiStatusText.textContent = `GitHub API ${remaining}/${limit}`;
+    els.apiStatusText.textContent = t('api.remaining', { remaining, limit });
     if (remaining < 10) els.apiStatus.classList.add('warning');
   } else {
-    els.apiStatusText.textContent = 'GitHub API · live';
+    els.apiStatusText.textContent = t('api.live');
   }
 }
 
@@ -242,8 +266,8 @@ export function showTooltip(repo: Repo, clientX: number, clientY: number): void 
   els.ttDesc.textContent = repo.description?.trim() ?? '';
   els.ttStars.textContent = `★ ${formatCount(repo.stars)}`;
   els.ttStars.className = 'stars';
-  els.ttLang.textContent = repo.language ?? '언어 없음';
-  els.ttPushed.textContent = `${relativeTime(repo.pushedAt)} 푸시`;
+  els.ttLang.textContent = repo.language ?? t('tooltip.noLanguage');
+  els.ttPushed.textContent = t('tooltip.pushed', { when: relativeTime(repo.pushedAt) });
   els.ttPushed.title = formatDate(repo.pushedAt);
 
   els.tooltip.classList.add('visible');
