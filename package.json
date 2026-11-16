@@ -1,0 +1,21 @@
+{
+  "name": "github-town",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Turn a GitHub user's repositories into a 3D town with three.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.187.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.8"
+  }
+}

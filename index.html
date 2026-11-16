@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0a0812" />
+    <title>GitHub Town — 리포지토리로 짓는 3D 도시</title>
+    <meta
+      name="description"
+      content="GitHub 사용자의 리포지토리를 3D 도시로 지어보세요. 오래된 리포지토리는 고스트 타운이 됩니다."
+    />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cpath d='M20 3 36 11 20 19 4 11Z' fill='%23a9c0ff'/%3E%3Cpath d='M4 11v13l16 8V19Z' fill='%235b6bd6'/%3E%3Cpath d='M36 11v13l-16 8V19Z' fill='%238fa8ff'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <div id="stage" aria-label="3D로 표현된 GitHub 마을"></div>
+    <div class="vignette" aria-hidden="true"></div>
+    <div class="grain" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="GitHub Town">
+        <svg class="brand-mark" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+          <defs>
+            <linearGradient id="brandTop" x1="6" y1="6" x2="34" y2="18" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#dbe5ff" />
+              <stop offset="1" stop-color="#8fa8ff" />
+            </linearGradient>
+            <linearGradient id="brandRight" x1="20" y1="19" x2="36" y2="32" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#7b8eea" />
+              <stop offset="1" stop-color="#4a58b8" />
+            </linearGradient>
+          </defs>
+          <path d="M20 3 36 11 20 19 4 11Z" fill="url(#brandTop)" />
+          <path d="M4 11v13l16 8V19Z" fill="#39449a" />
+          <path d="M36 11v13l-16 8V19Z" fill="url(#brandRight)" />
+          <path d="M13.5 15.8 20 12.5l6.5 3.3v7.4L20 26.5l-6.5-3.3Z" fill="#0d0c16" />
+          <path d="M15.4 18.2 20 15.9l4.6 2.3v1.2L20 21.7l-4.6-2.3Z" fill="#ffd7a1" />
+          <path d="M15.4 21.4 20 23.7l4.6-2.3v2.1L20 25.8l-4.6-2.3Z" fill="#6dffb4" opacity=".8" />
+        </svg>
+        <span class="brand-text">
+          <strong>GitHub Town</strong>
+          <small>리포지토리로 짓는 도시</small>
+        </span>
+      </a>
+
+      <form class="search" id="searchForm" autocomplete="off">
+        <label class="search-label" for="userInput">github.com/</label>
+        <input
+          id="userInput"
+          name="user"
+          spellcheck="false"
+          autocapitalize="off"
+          placeholder="jihoo12"
+          aria-label="GitHub 사용자 이름"
+        />
+        <button type="submit" id="buildButton">마을 짓기</button>
+      </form>
+
+      <div class="top-actions">
+        <button class="icon-button" id="refreshButton" title="새로고침" aria-label="새로고침">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M20 11a8 8 0 1 0-2.3 6.3M20 5v6h-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+        <button class="icon-button" id="tokenButton" title="GitHub 토큰 설정" aria-label="GitHub 토큰 설정">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="8" cy="8" r="4" stroke="currentColor" stroke-width="1.8" />
+            <path d="m11 11 8 8m-3-3 2-2m-5-1 2-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <section class="panel profile-panel" id="profilePanel" aria-label="현재 마을 정보">
+      <div class="panel-head">
+        <span class="eyebrow">CURRENT TOWN</span>
+        <span class="live-dot" title="라이브 데이터"></span>
+      </div>
+
+      <div class="profile">
+        <img id="avatar" class="avatar" alt="" width="46" height="46" />
+        <div class="profile-text">
+          <strong id="displayName">—</strong>
+          <a id="profileLink" href="https://github.com" target="_blank" rel="noreferrer">@—</a>
+        </div>
+      </div>
+      <p class="bio" id="bio">GitHub 사용자를 입력하면 리포지토리가 도시가 됩니다.</p>
+
+      <div class="stat-grid">
+        <div class="stat">
+          <b id="statRepos">—</b>
+          <span>리포지토리</span>
+        </div>
+        <div class="stat">
+          <b id="statStars">—</b>
+          <span>별</span>
+        </div>
+        <div class="stat">
+          <b id="statActive" class="active-value">—</b>
+          <span>활성</span>
+        </div>
+        <div class="stat">
+          <b id="statGhost" class="ghost-value">—</b>
+          <span>고스트</span>
+        </div>
+      </div>
+
+      <div class="languages">
+        <div class="languages-head">
+          <span>언어</span>
+          <span id="langNote">—</span>
+        </div>
+        <div class="lang-bar" id="langBar"></div>
+        <ul class="lang-list" id="langList"></ul>
+      </div>
+      <p class="cut-note" id="cutNote"></p>
+    </section>
+
+    <aside class="panel legend-panel" aria-label="범례">
+      <div class="panel-head">
+        <span class="eyebrow">HOW TO READ</span>
+      </div>
+      <ul class="legend">
+        <li>
+          <span class="swatch building"></span>
+          <div><b>활성 리포지토리</b><small>최근 30일 안에 푸시</small></div>
+        </li>
+        <li>
+          <span class="swatch ghost"></span>
+          <div><b>고스트 타운</b><small>30일 넘게 잊힌 리포지토리</small></div>
+        </li>
+        <li>
+          <span class="swatch tomb"></span>
+          <div><b>묘비</b><small>아카이브된 리포지토리</small></div>
+        </li>
+      </ul>
+      <p class="legend-note">건물 높이 = 스타 수<br />건물 색 = 주 언어</p>
+      <div class="legend-footer">
+        <span>three.js</span>
+        <span>·</span>
+        <span>GitHub REST API</span>
+      </div>
+    </aside>
+
+    <div class="api-status" id="apiStatus">
+      <span class="status-dot"></span>
+      <span id="apiStatusText">GitHub API</span>
+    </div>
+
+    <div class="hint" id="hint">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="6" y="2.5" width="12" height="19" rx="6" stroke="currentColor" stroke-width="1.5" />
+        <path d="M12 6.5v3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+      </svg>
+      <span>드래그로 회전 · 스크롤로 확대 · 건물 클릭 시 GitHub로 이동</span>
+    </div>
+
+    <div class="tooltip" id="tooltip" role="tooltip" aria-hidden="true">
+      <div class="tooltip-head">
+        <span class="tooltip-name" id="ttName"></span>
+        <span class="tooltip-badge" id="ttBadge"></span>
+      </div>
+      <p class="tooltip-desc" id="ttDesc"></p>
+      <div class="tooltip-meta">
+        <span id="ttStars"></span>
+        <span id="ttLang"></span>
+        <span id="ttPushed"></span>
+      </div>
+      <div class="tooltip-cta">GitHub에서 열기 <span>↗</span></div>
+    </div>
+
+    <div class="loading" id="loading">
+      <div class="loader-town" aria-hidden="true">
+        <span style="--h: 16px; --d: 0ms"></span>
+        <span style="--h: 30px; --d: 90ms"></span>
+        <span style="--h: 22px; --d: 180ms"></span>
+        <span style="--h: 40px; --d: 270ms"></span>
+        <span style="--h: 26px; --d: 360ms"></span>
+        <span style="--h: 34px; --d: 450ms"></span>
+      </div>
+      <p id="loadingTitle">첫 마을을 짓는 중…</p>
+      <span id="loadingSub">github.com/jihoo12</span>
+    </div>
+
+    <div class="error-card" id="errorCard" hidden>
+      <div class="error-mark" aria-hidden="true">!</div>
+      <h2 id="errorTitle">문제가 생겼어요</h2>
+      <p id="errorMessage"></p>
+      <div class="error-actions">
+        <button type="button" class="primary-button" id="retryButton">다시 시도</button>
+        <button type="button" class="ghost-button" id="demoButton">데모 타운</button>
+        <button type="button" class="ghost-button" id="errorTokenButton">토큰 추가</button>
+      </div>
+    </div>
+
+    <dialog id="tokenDialog">
+      <form id="tokenForm" method="dialog">
+        <div class="dialog-head">
+          <span class="eyebrow">GITHUB TOKEN</span>
+          <button type="button" class="dialog-close" id="tokenClose" aria-label="닫기">×</button>
+        </div>
+        <h2>호출 한도를 늘려보세요</h2>
+        <p class="dialog-copy">
+          토큰 없이도 마을을 지을 수 있지만, GitHub API는 시간당 60번만 호출을 허용합니다.
+          Personal access token을 넣으면 5,000번까지 늘어납니다.
+        </p>
+        <label class="field-label" for="tokenInput">Personal access token</label>
+        <input
+          id="tokenInput"
+          type="password"
+          class="field-input"
+          placeholder="github_pat_… 또는 ghp_…"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <p class="fine-print">
+          토큰은 이 브라우저의 localStorage에만 저장되며, 서버로 전송되지 않습니다.
+          공개 리포지토리만 읽는다면 추가 권한은 필요 없습니다.
+        </p>
+        <div class="dialog-actions">
+          <button type="button" class="ghost-button" id="tokenClear">토큰 삭제</button>
+          <button type="submit" class="primary-button">저장하고 새로고침</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
