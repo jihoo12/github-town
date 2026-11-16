@@ -259,7 +259,7 @@ function tintBuildingColor(repo: Repo, ghost: boolean): THREE.Color {
   const hsl = { h: 0, s: 0, l: 0 };
   color.getHSL(hsl);
   if (ghost) {
-    color.setHSL(hsl.h, Math.min(hsl.s, 0.12), 0.11 + Math.min(hsl.l, 0.6) * 0.04);
+    color.setHSL(hsl.h, Math.min(hsl.s, 0.12), 0.14 + Math.min(hsl.l, 0.6) * 0.04);
   } else {
     color.setHSL(
       hsl.h,
@@ -436,7 +436,7 @@ export function buildTown(
       map: windowTextures.facade,
       emissiveMap: ghost ? windowTextures.ghostGlow : windowTextures.glow,
       emissive: ghost ? 0x59d99f : 0xffcf97,
-      emissiveIntensity: ghost ? 0.26 : 1.18,
+      emissiveIntensity: ghost ? 0.42 : 1.18,
       roughness: ghost ? 1 : 0.78,
       metalness: ghost ? 0 : 0.08,
     });
@@ -1099,7 +1099,6 @@ export function buildTown(
     });
 
     // Ground mist and drifting spirits.
-    fogTexture.repeat.set(1.6, 1.6);
     const mistMaterial = new THREE.MeshBasicMaterial({
       map: fogTexture,
       color: 0x62ffbc,

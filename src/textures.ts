@@ -399,8 +399,9 @@ export function createFogTexture(anisotropy: number): THREE.Texture {
   ctx.globalCompositeOperation = 'source-over';
 
   const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
+  // Clamp so the radial fade is not tiled into visible rectangles.
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = anisotropy;
   return texture;
