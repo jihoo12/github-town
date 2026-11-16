@@ -96,8 +96,18 @@ export interface BuiltTown {
     position: THREE.Vector3;
     yaw: number;
   };
-  /** Walkable area: the island top, inset from its edge. */
-  walkBounds: Rect;
+  /** Walkable area: the island top, inset from its edge, with rounded corners. */
+  walkBounds: Rect & { cornerRadius: number };
+  /** Static round obstacles (poles, trunks, sign posts) in world units. */
+  obstacles: Obstacle[];
+  /** Moving obstacles (cars) at the current tick, in world units. */
+  movingObstacles: () => Obstacle[];
+}
+
+export interface Obstacle {
+  x: number;
+  z: number;
+  r: number;
 }
 
 function byStars(a: Repo, b: Repo): number {
@@ -787,6 +797,11 @@ export function buildTown(
   }
 
   const S = WORLD_SCALE;
+  /** Collected in design units; converted to world units on return. */
+  const obstacles: Obstacle[] = [];
+  const home = layout.active ?? layout.ruins ?? layout.cemetery ?? layout.island;
+  const spawnX = home.x;
+  const spawnZ = home.z + home.d / 2 + 11;
   /** Point lights do not inherit the group scale, so scale range and power here. */
   const pointLight = (color: THREE.ColorRepresentation, intensity: number, distance: number) =>
     new THREE.PointLight(color, intensity * S * S, distance * S, 2);
@@ -972,6 +987,7 @@ export function buildTown(
     const dead = inRuins(x);
     const lamp = new THREE.Group();
     lamp.position.set(x, 0.18, z);
+    obstacles.push({ x, z, r: 0.12 });
     const pole = new THREE.Mesh(
       new THREE.CylinderGeometry(0.07, 0.1, 3.3, 6),
       darkStoneMaterial,
@@ -1194,6 +1210,7 @@ export function buildTown(
     ghostLampSpots.forEach((spot, index) => {
       const lamp = new THREE.Group();
       lamp.position.set(spot.x, 0.16, spot.z);
+      obstacles.push({ x: spot.x, z: spot.z, r: 0.13 });
       const pole = new THREE.Mesh(
         new THREE.CylinderGeometry(0.07, 0.11, 3.1, 5),
         darkStoneMaterial,
@@ -1267,6 +1284,7 @@ export function buildTown(
       const tree = new THREE.Group();
       const height = 2 + Math.random() * 2.4;
       tree.position.set(treeX, 0.1, treeZ);
+      obstacles.push({ x: treeX, z: treeZ, r: 0.22 });
       const trunk = new THREE.Mesh(
         new THREE.CylinderGeometry(0.1, 0.22, height, 5),
         woodMaterial,
@@ -1306,12 +1324,11 @@ export function buildTown(
     const z = layout.island.z + (Math.random() - 0.5) * (layout.island.d - 14);
     if (exclusionRects.some((rect) => pointInRect(x, z, rect, 3))) continue;
     if (treePositions.some((tree) => Math.hypot(tree.x - x, tree.z - z) < 3.2)) continue;
-    treePositions.push({
-      x,
-      z,
-      scale: 0.75 + Math.random() * 0.9,
-      tint: Math.random(),
-    });
+    // Keep the opening view clear.
+    if (Math.hypot(x - spawnX, z - spawnZ) < 7) continue;
+    const scale = 0.75 + Math.random() * 0.9;
+    treePositions.push({ x, z, scale, tint: Math.random() });
+    obstacles.push({ x, z, r: 0.21 * scale });
   }
 
   if (treePositions.length) {
@@ -1417,6 +1434,7 @@ export function buildTown(
     for (const offset of [-width * 0.32, width * 0.32]) {
       const post = new THREE.Mesh(postGeometry, woodMaterial);
       post.position.set(offset, 1.7, 0);
+      obstacles.push({ x: x + offset * sign.scale.x, z, r: 0.22 * sign.scale.x });
       post.castShadow = true;
       sign.add(post);
     }
@@ -1522,15 +1540,23 @@ export function buildTown(
   group.scale.setScalar(S);
 
   // Start just outside the main street, facing into town.
-  const home = layout.active ?? layout.ruins ?? layout.cemetery ?? layout.island;
   const spawn = {
-    position: new THREE.Vector3(
-      home.x * S,
-      0.1 * S + EYE_HEIGHT,
-      (home.z + home.d / 2 + 11) * S,
-    ),
+    position: new THREE.Vector3(spawnX * S, 0.1 * S + EYE_HEIGHT, spawnZ * S),
     yaw: 0,
   };
+  // A car body is 1.5 (local x) by 0.9 (local z, its heading) design units:
+  // two circles side by side across the heading cover it.
+  const movingObstacles = (): Obstacle[] =>
+    cars.flatMap((car) => {
+      const { x, z } = car.object.position;
+      const heading = car.object.rotation.y;
+      const dx = Math.cos(heading) * 0.38;
+      const dz = -Math.sin(heading) * 0.38;
+      return [
+        { x: (x + dx) * S, z: (z + dz) * S, r: 0.5 * S },
+        { x: (x - dx) * S, z: (z - dz) * S, r: 0.5 * S },
+      ];
+    });
   const walkInset = 7;
   return {
     group,
@@ -1548,6 +1574,10 @@ export function buildTown(
       z: layout.island.z * S,
       w: (layout.island.w - walkInset * 2) * S,
       d: (layout.island.d - walkInset * 2) * S,
+      // The island outline uses a 22-unit corner radius.
+      cornerRadius: (22 - walkInset) * S,
     },
+    obstacles: obstacles.map((o) => ({ x: o.x * S, z: o.z * S, r: o.r * S })),
+    movingObstacles,
   };
 }

@@ -4,7 +4,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import type { Repo } from './github';
-import { STREET_Y, WORLD_SCALE, type BuiltTown, type BuildingHandle, type Rect } from './town';
+import { STREET_Y, WORLD_SCALE, type BuiltTown, type BuildingHandle, type Obstacle } from './town';
 import { clamp } from './theme';
 
 export interface HoverInfo {
@@ -28,7 +28,8 @@ const GRAVITY = 17;
 const LOOK_SENSITIVITY = 0.0021;
 const DRAG_SENSITIVITY = 0.0042;
 const PICK_DISTANCE = 320;
-const INTRO_MS = 3400;
+/** Longest distance moved per collision sub-step, so fast runs cannot tunnel through poles. */
+const MAX_STEP = 0.15;
 
 function isTyping(): boolean {
   const active = document.activeElement;
@@ -63,13 +64,6 @@ export class TownWorld {
 
   private town: BuiltTown | null = null;
   private hovered: BuildingHandle | null = null;
-  private intro: {
-    fromPosition: THREE.Vector3;
-    toPosition: THREE.Vector3;
-    fromQuaternion: THREE.Quaternion;
-    toQuaternion: THREE.Quaternion;
-    progress: number;
-  } | null = null;
   private hoveredClient = { clientX: 0, clientY: 0 };
   private resizeObserver: ResizeObserver;
 
@@ -81,7 +75,8 @@ export class TownWorld {
   private eyeY = STREET_Y + 1.7;
   private readonly keys = new Set<string>();
   private colliders: Collider[] = [];
-  private walkBounds: Rect | null = null;
+  private obstacles: Obstacle[] = [];
+  private walkBounds: BuiltTown['walkBounds'] | null = null;
   private locked = false;
   private drag: { id: number; x: number; y: number; moved: boolean; type: string } | null = null;
   private stick: { id: number; x: number; y: number } | null = null;
@@ -354,34 +349,21 @@ export class TownWorld {
       box.setFromObject(mesh);
       return { minX: box.min.x, maxX: box.max.x, minZ: box.min.z, maxZ: box.max.z };
     });
+    this.obstacles = town.obstacles;
     this.walkBounds = town.walkBounds;
 
-    const { target, radius } = town.view;
+    const { target } = town.view;
     const islandSpan = Math.max(town.layout.island.w, town.layout.island.d) * WORLD_SCALE;
 
-    // Fly in from an overview of the whole town down to street level.
-    const overview = target
-      .clone()
-      .add(new THREE.Vector3(0.62, 0.72, 1).normalize().multiplyScalar(radius * 2.2));
-    this.camera.position.copy(overview);
-    this.camera.lookAt(target);
-    const fromQuaternion = this.camera.quaternion.clone();
-
+    // Start on foot at street level, facing into town.
     this.eyeY = town.spawn.position.y;
     this.yaw = town.spawn.yaw;
     this.pitch = 0.06;
     this.jumpOffset = 0;
     this.verticalSpeed = 0;
     this.velocity.set(0, 0, 0);
-    this.intro = {
-      fromPosition: overview,
-      toPosition: town.spawn.position.clone(),
-      fromQuaternion,
-      toQuaternion: new THREE.Quaternion().setFromEuler(
-        new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'),
-      ),
-      progress: 0,
-    };
+    this.camera.position.copy(town.spawn.position);
+    this.camera.quaternion.setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'));
 
     const shadowRadius = islandSpan * 0.6;
     const keyOffset = new THREE.Vector3(-90, 160, 100).multiplyScalar(WORLD_SCALE);
@@ -443,13 +425,6 @@ export class TownWorld {
 
   // ------------------------------------------------------------------ input --
 
-  /** Jump straight to street level if the viewer starts acting during the fly-in. */
-  private skipIntro(): void {
-    if (!this.intro) return;
-    this.camera.position.copy(this.intro.toPosition);
-    this.intro = null;
-  }
-
   private requestLock(): void {
     const canvas = this.renderer.domElement;
     if (!('requestPointerLock' in canvas)) return;
@@ -478,7 +453,6 @@ export class TownWorld {
     if (!movementKeys.includes(event.code)) return;
     if (!this.town) return;
     event.preventDefault();
-    this.skipIntro();
     this.keys.add(event.code);
   };
 
@@ -493,7 +467,6 @@ export class TownWorld {
 
   private handlePointerDown = (event: PointerEvent): void => {
     if (event.target !== this.renderer.domElement) return;
-    this.skipIntro();
     if (this.locked) return;
     if (this.drag) return;
     this.drag = {
@@ -507,7 +480,7 @@ export class TownWorld {
 
   private handlePointerMove = (event: PointerEvent): void => {
     if (this.locked) {
-      if (!this.intro) this.look(event.movementX, event.movementY, LOOK_SENSITIVITY);
+      this.look(event.movementX, event.movementY, LOOK_SENSITIVITY);
       return;
     }
 
@@ -520,7 +493,7 @@ export class TownWorld {
       const dx = event.clientX - this.drag.x;
       const dy = event.clientY - this.drag.y;
       if (!this.drag.moved && Math.hypot(dx, dy) > 6) this.drag.moved = true;
-      if (this.drag.moved && !this.intro) {
+      if (this.drag.moved) {
         this.look(dx, dy, DRAG_SENSITIVITY);
         this.drag.x = event.clientX;
         this.drag.y = event.clientY;
@@ -569,7 +542,6 @@ export class TownWorld {
   private handleStickDown = (event: PointerEvent): void => {
     if (!this.joystickEl) return;
     event.preventDefault();
-    this.skipIntro();
     const rect = this.joystickEl.getBoundingClientRect();
     this.stick = {
       id: event.pointerId,
@@ -653,29 +625,89 @@ export class TownWorld {
 
   // --------------------------------------------------------------- movement --
 
-  private collide(x: number, z: number, previousX: number, previousZ: number): { x: number; z: number } {
+  /**
+   * Push a circle of PLAYER_RADIUS out of every building box, pole, trunk and
+   * car it overlaps, then keep it on the island. Pushing along the contact
+   * normal (closest point on the box) lets the walker slide around corners.
+   */
+  private resolve(point: { x: number; z: number }, moving: Obstacle[]): void {
     const r = PLAYER_RADIUS;
-    let nextX = x;
-    for (const box of this.colliders) {
-      if (previousZ <= box.minZ - r || previousZ >= box.maxZ + r) continue;
-      if (nextX <= box.minX - r || nextX >= box.maxX + r) continue;
-      // Already inside (e.g. spawned on a tombstone): let the walker out.
-      if (previousX > box.minX - r && previousX < box.maxX + r) continue;
-      nextX = previousX <= box.minX - r ? box.minX - r - 0.001 : box.maxX + r + 0.001;
+    for (let pass = 0; pass < 3; pass += 1) {
+      let pushed = false;
+      for (const box of this.colliders) {
+        if (
+          point.x <= box.minX - r ||
+          point.x >= box.maxX + r ||
+          point.z <= box.minZ - r ||
+          point.z >= box.maxZ + r
+        ) {
+          continue;
+        }
+        const closestX = clamp(point.x, box.minX, box.maxX);
+        const closestZ = clamp(point.z, box.minZ, box.maxZ);
+        const dx = point.x - closestX;
+        const dz = point.z - closestZ;
+        const distanceSq = dx * dx + dz * dz;
+        if (distanceSq >= r * r) continue;
+        pushed = true;
+        if (distanceSq > 1e-10) {
+          const distance = Math.sqrt(distanceSq);
+          point.x += (dx / distance) * (r - distance);
+          point.z += (dz / distance) * (r - distance);
+        } else {
+          // Centre is inside the box: leave by the nearest face.
+          const exits = [
+            { d: point.x - box.minX, x: box.minX - r, z: point.z },
+            { d: box.maxX - point.x, x: box.maxX + r, z: point.z },
+            { d: point.z - box.minZ, x: point.x, z: box.minZ - r },
+            { d: box.maxZ - point.z, x: point.x, z: box.maxZ + r },
+          ].sort((a, b) => a.d - b.d);
+          point.x = exits[0]!.x;
+          point.z = exits[0]!.z;
+        }
+      }
+      for (const list of [this.obstacles, moving]) {
+        for (const obstacle of list) {
+          const minDistance = r + obstacle.r;
+          const dx = point.x - obstacle.x;
+          const dz = point.z - obstacle.z;
+          if (Math.abs(dx) >= minDistance || Math.abs(dz) >= minDistance) continue;
+          const distanceSq = dx * dx + dz * dz;
+          if (distanceSq >= minDistance * minDistance) continue;
+          pushed = true;
+          const distance = Math.sqrt(distanceSq) || 1e-5;
+          const nx = distanceSq > 1e-10 ? dx / distance : 1;
+          const nz = distanceSq > 1e-10 ? dz / distance : 0;
+          point.x = obstacle.x + nx * minDistance;
+          point.z = obstacle.z + nz * minDistance;
+        }
+      }
+      if (!pushed) break;
     }
-    let nextZ = z;
-    for (const box of this.colliders) {
-      if (nextX <= box.minX - r || nextX >= box.maxX + r) continue;
-      if (nextZ <= box.minZ - r || nextZ >= box.maxZ + r) continue;
-      if (previousZ > box.minZ - r && previousZ < box.maxZ + r) continue;
-      nextZ = previousZ <= box.minZ - r ? box.minZ - r - 0.001 : box.maxZ + r + 0.001;
-    }
+    this.keepOnIsland(point);
+  }
+
+  private keepOnIsland(point: { x: number; z: number }): void {
     const bounds = this.walkBounds;
-    if (bounds) {
-      nextX = clamp(nextX, bounds.x - bounds.w / 2, bounds.x + bounds.w / 2);
-      nextZ = clamp(nextZ, bounds.z - bounds.d / 2, bounds.z + bounds.d / 2);
+    if (!bounds) return;
+    const halfW = bounds.w / 2;
+    const halfD = bounds.d / 2;
+    point.x = clamp(point.x, bounds.x - halfW, bounds.x + halfW);
+    point.z = clamp(point.z, bounds.z - halfD, bounds.z + halfD);
+    // Rounded corners, matching the island outline.
+    const corner = Math.min(bounds.cornerRadius, halfW, halfD);
+    const offsetX = point.x - bounds.x;
+    const offsetZ = point.z - bounds.z;
+    const qx = Math.abs(offsetX) - (halfW - corner);
+    const qz = Math.abs(offsetZ) - (halfD - corner);
+    if (qx > 0 && qz > 0) {
+      const distance = Math.hypot(qx, qz);
+      if (distance > corner) {
+        const scale = corner / distance;
+        point.x = bounds.x + Math.sign(offsetX) * (halfW - corner + qx * scale);
+        point.z = bounds.z + Math.sign(offsetZ) * (halfD - corner + qz * scale);
+      }
     }
-    return { x: nextX, z: nextZ };
   }
 
   private walk(delta: number): void {
@@ -701,12 +733,17 @@ export class TownWorld {
     this.velocity.lerp(wish, 1 - Math.exp(-delta * 9));
 
     const position = this.camera.position;
-    const next = this.collide(
-      position.x + this.velocity.x * delta,
-      position.z + this.velocity.z * delta,
-      position.x,
-      position.z,
-    );
+    const moving = this.town?.movingObstacles() ?? [];
+    const next = { x: position.x, z: position.z };
+    const travelX = this.velocity.x * delta;
+    const travelZ = this.velocity.z * delta;
+    const steps = Math.max(1, Math.ceil(Math.hypot(travelX, travelZ) / MAX_STEP));
+    // Always resolve at least once, so a passing car shoves a standing walker aside.
+    for (let step = 0; step < steps; step += 1) {
+      next.x += travelX / steps;
+      next.z += travelZ / steps;
+      this.resolve(next, moving);
+    }
     // Kill velocity into walls so the walker slides instead of sticking.
     if (delta > 0) {
       this.velocity.x = (next.x - position.x) / delta;
@@ -736,20 +773,7 @@ export class TownWorld {
     const elapsed = (now - this.startedAt) / 1000;
     this.lastFrame = now;
 
-    if (this.intro) {
-      // Advance by the clamped frame delta, so a slow first frame (shader
-      // compilation) cannot skip the fly-in.
-      this.intro.progress += (delta * 1000) / INTRO_MS;
-      const t = clamp(this.intro.progress, 0, 1);
-      const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-      this.camera.position.lerpVectors(this.intro.fromPosition, this.intro.toPosition, eased);
-      this.camera.quaternion.slerpQuaternions(
-        this.intro.fromQuaternion,
-        this.intro.toQuaternion,
-        eased,
-      );
-      if (t >= 1) this.intro = null;
-    } else if (this.town) {
+    if (this.town) {
       this.walk(delta);
       if (this.locked) {
         // Aim with the crosshair in the middle of the screen.
